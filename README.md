@@ -214,14 +214,46 @@ docker compose exec backend curl -I --connect-timeout 2 https://google.com
 │   └── falkordb/
 │       └── README.md              # FalkorDB graph persistence guide
 └── scripts/
-    └── verify_phase0.py           # Self-contained Phase 0 verification script
+    ├── verify_phase0.py           # Self-contained Phase 0 verification script
+    └── verify_phase1.py           # Self-contained Phase 1 ingestion verification script
 ```
+
+---
+
+## Phase 1 — Ingestion Pipeline API Reference
+
+### 1. Ingest Multi-Modal Document
+```bash
+curl -X POST http://localhost:8000/api/v1/ingest/upload \
+  -F "file=@sample_report.pdf" \
+  -F "uploader_id=operator_primary"
+```
+
+**Supported Inputs & Router Dispatch:**
+| Input Category | Supported Formats | Engine / Dispatch | Extracted Structure |
+|---|---|---|---|
+| **Plain & Markdown** | `.txt`, `.md`, `.csv`, `.json` | `TextParser` | Markdown headings, lines, word count |
+| **Structured Documents** | `.pdf`, `.docx`, `.pptx` | `DoclingParser` | Page bounds, headings, tables, slides, speaker notes |
+| **Images & Scans** | `.png`, `.jpg`, `.jpeg`, `.webp`, `.tiff` | `OCRParser` (PaddleOCR) | Text lines, coordinates, confidence scores |
+| **Audio & Video** | `.wav`, `.mp3`, `.m4a`, `.mp4`, `.mkv`, `.mov` | `WhisperParser` | Transcripts with second-accurate `timestamps` |
+
+### 2. Verify AES-256 At-Rest Encryption
+```bash
+curl http://localhost:8000/api/v1/ingest/documents/<DOC_ID>/verify-encryption
+```
+Verifies that raw bytes on disk are unreadable ciphertext (GCM authenticated) and match the cryptographic SHA-256 file checksum when decrypted with the enclave key.
+
+### 3. Verify Tamper-Evident Audit Chain
+```bash
+curl http://localhost:8000/api/v1/audit/verify-chain
+```
+Verifies that all audit records maintain an unbroken SHA-256 hash sequence.
 
 ---
 
 ## Phase Roadmap
 - **[x] Phase 0: Repo Scaffolding & Environment** — Running skeleton with all 5 services stubbed, zero egress network, health checks, CI stub.
-- **[ ] Phase 1: Ingestion Pipeline** — Docling, PaddleOCR, Whisper router, AES-256 encryption at rest, audit logging on upload.
+- **[x] Phase 1: Ingestion Pipeline** — Multi-modal file router (Docling, PaddleOCR, Whisper), common SourceDocument schema, AES-256 encryption at rest, append-only tamper-evident audit logging, and low-confidence flags.
 - **[ ] Phase 2: Understanding & Chunking Layer** — Semantic chunking, entity extraction, local embeddings, Qdrant & FalkorDB upserts.
 - **[ ] Phase 3: Grounding & Retrieval Service** — `/retrieve` and `/trace` endpoints, strict claim-citation contract.
 - **[ ] Phase 4: Output Generation Adapters** — LinkedIn, Twitter, Exec Summary, Advisory, Presentation, Video Package, Infographic.

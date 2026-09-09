@@ -37,9 +37,7 @@ async def get_overall_health(response: Response) -> dict[str, Any]:
     qdrant_task = asyncio.create_task(check_qdrant_health())
     falkordb_task = asyncio.create_task(check_falkordb_health())
 
-    results = await asyncio.gather(
-        pg_task, qdrant_task, falkordb_task, return_exceptions=True
-    )
+    results = await asyncio.gather(pg_task, qdrant_task, falkordb_task, return_exceptions=True)
     postgres_res: Any = results[0]
     qdrant_res: Any = results[1]
     falkordb_res: Any = results[2]
@@ -59,9 +57,7 @@ async def get_overall_health(response: Response) -> dict[str, Any]:
     fk_norm = normalize_result(falkordb_res, "falkordb")
 
     all_healthy = (
-        pg_norm.get("status") == "healthy"
-        and qd_norm.get("status") == "healthy"
-        and fk_norm.get("status") == "healthy"
+        pg_norm.get("status") == "healthy" and qd_norm.get("status") == "healthy" and fk_norm.get("status") == "healthy"
     )
 
     if not all_healthy and settings.ENVIRONMENT == "production":

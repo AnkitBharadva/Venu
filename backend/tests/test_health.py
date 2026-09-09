@@ -44,9 +44,11 @@ async def test_aggregate_health_all_healthy():
     mock_qd = {"status": "healthy", "latency_ms": 2.1, "host": "qdrant:6333", "collections_count": 0, "error": None}
     mock_fk = {"status": "healthy", "latency_ms": 0.9, "host": "falkordb:6379", "server_info": {}, "error": None}
 
-    with patch("app.api.health.check_postgres_health", return_value=mock_pg), \
-         patch("app.api.health.check_qdrant_health", return_value=mock_qd), \
-         patch("app.api.health.check_falkordb_health", return_value=mock_fk):
+    with (
+        patch("app.api.health.check_postgres_health", return_value=mock_pg),
+        patch("app.api.health.check_qdrant_health", return_value=mock_qd),
+        patch("app.api.health.check_falkordb_health", return_value=mock_fk),
+    ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             response = await ac.get("/health")
 
@@ -65,9 +67,11 @@ async def test_aggregate_health_degraded():
     mock_qd = {"status": "unhealthy", "latency_ms": 20.0, "host": "qdrant:6333", "error": "Connection refused"}
     mock_fk = {"status": "healthy", "latency_ms": 0.9, "host": "falkordb:6379", "server_info": {}, "error": None}
 
-    with patch("app.api.health.check_postgres_health", return_value=mock_pg), \
-         patch("app.api.health.check_qdrant_health", return_value=mock_qd), \
-         patch("app.api.health.check_falkordb_health", return_value=mock_fk):
+    with (
+        patch("app.api.health.check_postgres_health", return_value=mock_pg),
+        patch("app.api.health.check_qdrant_health", return_value=mock_qd),
+        patch("app.api.health.check_falkordb_health", return_value=mock_fk),
+    ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             response = await ac.get("/health")
 
