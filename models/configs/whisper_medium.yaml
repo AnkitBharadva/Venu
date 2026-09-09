@@ -1,0 +1,20 @@
+model_name: "Whisper-medium.en"
+model_type: "automatic-speech-recognition"
+role: "Audio/Video Transcription & Timestamp Alignment"
+architecture: "encoder-decoder-transformer"
+sampling_rate_hz: 16000
+parameters:
+  beam_size: 5
+  word_timestamps: true
+  vad_filter: true
+local_serving:
+  engine: "faster-whisper"
+  model_path: "models/weights/whisper-medium.en"
+  compute_type: "float16" # fallback to int8 on CPU
+  device: "auto"
+hardware_requirements:
+  min_vram_gb: 3.0
+  cpu_supported: true
+integrity:
+  format: "bin/ctranslate2"
+  checksum_sha256: "local-staged-sha256-hash-placeholder"

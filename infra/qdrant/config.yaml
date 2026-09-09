@@ -1,0 +1,16 @@
+# Qdrant Air-Gapped Configuration
+# Ensures zero outbound network telemetry and strictly local vector storage
+
+log_level: INFO
+
+storage:
+  storage_path: /qdrant/storage
+  snapshots_path: /qdrant/snapshots
+  on_disk_payload: true
+
+service:
+  http_port: 6333
+  grpc_port: 6334
+  enable_cors: true
+
+telemetry_disabled: true

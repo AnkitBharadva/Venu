@@ -1,0 +1,22 @@
+model_name: "Qwen3-8B-Instruct"
+model_type: "causal-lm"
+role: "Reasoning, Claim Synthesis, Grounding Attribution"
+architecture: "qwen"
+context_window: 8192
+max_output_tokens: 4096
+parameters:
+  temperature: 0.2
+  top_p: 0.95
+  repetition_penalty: 1.05
+local_serving:
+  engine: "ollama" # or vllm
+  model_tag: "qwen3:8b-instruct-q4_K_M"
+  base_url: "http://localhost:11434"
+  timeout_seconds: 120
+hardware_requirements:
+  min_vram_gb: 6.0
+  recommended_vram_gb: 8.0
+  cpu_fallback: true
+integrity:
+  format: "gguf"
+  checksum_sha256: "local-staged-sha256-hash-placeholder"

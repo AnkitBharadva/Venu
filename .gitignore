@@ -1,0 +1,68 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Environment files
+!.env.example
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+frontend/build/
+frontend/dist/
+
+# Testing & Coverage
+.coverage
+.coverage.*
+.pytest_cache/
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# IDE / Editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Model weights & large binaries (keep git lightweight)
+models/weights/*
+!models/weights/.gitkeep
+*.bin
+*.pt
+*.pth
+*.safetensors
+*.onnx
+*.gguf
+
+# Storage & Database data volumes
+data/
+postgres_data/
+qdrant_data/
+falkordb_data/
+*.db
+*.sqlite3
+
+# Temporary files & logs
+*.log
+logs/
+tmp/
+scratch/

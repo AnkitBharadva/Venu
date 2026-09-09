@@ -1,0 +1,21 @@
+model_name: "bge-small-en-v1.5"
+model_type: "dense-text-embedding"
+role: "Vector Embeddings for Semantic Retrieval & Grounding"
+architecture: "bert-based"
+dimension: 384
+max_tokens: 512
+similarity_metric: "cosine"
+local_serving:
+  engine: "fastembed" # or sentence-transformers
+  model_path: "models/weights/bge-small-en-v1.5"
+  device: "cpu" # low footprint, fast on local CPU
+hardware_requirements:
+  min_ram_gb: 1.0
+  gpu_optional: true
+qdrant_collection_spec:
+  vector_size: 384
+  distance: "Cosine"
+  on_disk_payload: true
+integrity:
+  format: "onnx/safetensors"
+  checksum_sha256: "local-staged-sha256-hash-placeholder"
