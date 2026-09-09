@@ -6,6 +6,21 @@ from app.schemas.source_document import (
     DocumentUploadResponse,
     SourceDocumentResponse,
 )
+from app.schemas.understanding import (
+    ChunkResponse,
+    DocumentUnderstandingResponse,
+    EntityGraphQueryResponse,
+    EntityMention,
+    EntityRelationship,
+    GraphEdge,
+    GraphNode,
+    GraphVisualizationResponse,
+    ProcessDocumentResponse,
+    SemanticSearchRequest,
+    SemanticSearchResponse,
+    SemanticSearchResultItem,
+    SensitiveTerm,
+)
 
 __all__ = [
     "SourceDocumentResponse",
@@ -13,4 +28,17 @@ __all__ = [
     "DocumentSummary",
     "AuditLogResponse",
     "AuditVerificationResponse",
+    "ChunkResponse",
+    "EntityMention",
+    "SensitiveTerm",
+    "EntityRelationship",
+    "DocumentUnderstandingResponse",
+    "ProcessDocumentResponse",
+    "SemanticSearchRequest",
+    "SemanticSearchResultItem",
+    "SemanticSearchResponse",
+    "GraphNode",
+    "GraphEdge",
+    "GraphVisualizationResponse",
+    "EntityGraphQueryResponse",
 ]

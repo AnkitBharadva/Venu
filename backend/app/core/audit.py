@@ -104,6 +104,9 @@ async def record_audit_event(
     return audit_entry
 
 
+record_audit_log = record_audit_event
+
+
 async def verify_audit_integrity(session: AsyncSession) -> dict[str, Any]:
     """Verify entire audit log table against the cryptographic hash chain."""
     stmt = select(AuditLog).order_by(AuditLog.id.asc())

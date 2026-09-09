@@ -1,6 +1,7 @@
 """FalkorDB / Graph database client provider and health check."""
 
 import logging
+import socket
 import time
 from typing import Any
 
@@ -12,13 +13,31 @@ logger = logging.getLogger("app.core.falkordb_client")
 settings = get_settings()
 
 
+def is_falkordb_live(timeout: float = 0.2) -> bool:
+    """Fast non-blocking probe to verify if FalkorDB socket is actively listening."""
+    for host in (settings.FALKORDB_HOST, "127.0.0.1"):
+        try:
+            with socket.create_connection((host, settings.FALKORDB_PORT), timeout=timeout):
+                return True
+        except (TimeoutError, socket.gaierror, ConnectionRefusedError, OSError):
+            continue
+    return False
+
+
 def get_redis_client() -> aioredis.Redis:
     """Return an async redis connection for FalkorDB."""
+    target_host = settings.FALKORDB_HOST
+    try:
+        with socket.create_connection((settings.FALKORDB_HOST, settings.FALKORDB_PORT), timeout=0.1):
+            target_host = settings.FALKORDB_HOST
+    except Exception:
+        target_host = "127.0.0.1"
+
     return aioredis.Redis(
-        host=settings.FALKORDB_HOST,
+        host=target_host,
         port=settings.FALKORDB_PORT,
-        socket_connect_timeout=3.0,
-        socket_timeout=3.0,
+        socket_connect_timeout=1.0,
+        socket_timeout=1.0,
         decode_responses=True,
     )
 

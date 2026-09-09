@@ -215,7 +215,8 @@ docker compose exec backend curl -I --connect-timeout 2 https://google.com
 │       └── README.md              # FalkorDB graph persistence guide
 └── scripts/
     ├── verify_phase0.py           # Self-contained Phase 0 verification script
-    └── verify_phase1.py           # Self-contained Phase 1 ingestion verification script
+    ├── verify_phase1.py           # Self-contained Phase 1 ingestion verification script
+    └── verify_phase2.py           # Self-contained Phase 2 understanding & chunking verification
 ```
 
 ---
@@ -241,20 +242,65 @@ curl -X POST http://localhost:8000/api/v1/ingest/upload \
 ```bash
 curl http://localhost:8000/api/v1/ingest/documents/<DOC_ID>/verify-encryption
 ```
-Verifies that raw bytes on disk are unreadable ciphertext (GCM authenticated) and match the cryptographic SHA-256 file checksum when decrypted with the enclave key.
 
 ### 3. Verify Tamper-Evident Audit Chain
 ```bash
 curl http://localhost:8000/api/v1/audit/verify-chain
 ```
-Verifies that all audit records maintain an unbroken SHA-256 hash sequence.
+
+---
+
+## Phase 2 — Understanding & Chunking Layer API Reference
+
+### 1. Process Document Understanding & Chunking
+```bash
+curl -X POST http://localhost:8000/api/v1/understand/process/<DOC_ID>?actor=operator_primary
+```
+Triggers:
+- **Semantic paragraph & section-aware chunking** preserving exact character offsets (`raw_text[start:end] == chunk.text`).
+- **Entity, Topic, Intent & Sensitive Terms Extraction** (grounded in `chunk_id`s).
+- **384-dimensional dense embeddings** generated via local model (`bge-small-en-v1.5` compatible).
+- **Vector upsert into Qdrant** collection `source_chunks`.
+- **Knowledge graph upsert into FalkorDB** (Document, Chunk, Entity, Topic nodes with Cypher relations).
+- **Cryptographically chained audit event** (`process_understanding`) committed to PostgreSQL.
+
+### 2. Retrieve Grounded Chunks with Exact Offsets
+```bash
+curl http://localhost:8000/api/v1/understand/documents/<DOC_ID>/chunks
+```
+Returns structured, addressable chunks with exact `char_offset_start`, `char_offset_end`, section `heading`, `page_number`, `timestamp_start/end`, and `offset_verified: true`.
+
+### 3. Retrieve Document Intelligence (Objective, Topics, Entities, Sensitivities)
+```bash
+curl http://localhost:8000/api/v1/understand/documents/<DOC_ID>/understanding
+```
+Returns:
+- `objective`: Extracted mission mandate or operational intent.
+- `topics`: Thematic topic tags.
+- `key_entities`: Categorized entity mentions (`ORGANIZATION`, `WEAPON_SYSTEM`, `LOCATION`, `TACTIC_TECHNIQUE`, `PERSON`, `DATE_TIME`) with mention counts and referencing `chunk_ids`.
+- `sensitive_terms`: Advisory markers (`TOP SECRET`, `CVE-2024-XXXX`, `CBRN`, `DEFCON`) with severity ranking and referencing `chunk_ids`.
+- `relationships`: Semantic relation triples with grounding `chunk_id`.
+
+### 4. Vector Semantic Search via Qdrant
+```bash
+curl -X POST http://localhost:8000/api/v1/understand/search/semantic \
+  -H "Content-Type: application/json" \
+  -d '{"query": "border radar and air defense missiles", "doc_id": "<DOC_ID>", "top_k": 3}'
+```
+Returns ranked semantic chunks with Cosine similarity score, text span, and character offsets.
+
+### 5. FalkorDB Knowledge Graph Query
+```bash
+curl http://localhost:8000/api/v1/understand/graph/entity/Rafale
+```
+Returns connected entity graph, relationship types (`OPERATED_BY`, `STATIONED_AT`, `DEPLOYED_WITH`), and referencing `chunk_ids`.
 
 ---
 
 ## Phase Roadmap
 - **[x] Phase 0: Repo Scaffolding & Environment** — Running skeleton with all 5 services stubbed, zero egress network, health checks, CI stub.
 - **[x] Phase 1: Ingestion Pipeline** — Multi-modal file router (Docling, PaddleOCR, Whisper), common SourceDocument schema, AES-256 encryption at rest, append-only tamper-evident audit logging, and low-confidence flags.
-- **[ ] Phase 2: Understanding & Chunking Layer** — Semantic chunking, entity extraction, local embeddings, Qdrant & FalkorDB upserts.
+- **[x] Phase 2: Understanding & Chunking Layer** — Semantic paragraph/section-aware chunking preserving exact character offsets, entity/topic/intent/sensitive terms extraction, 384-dim dense embeddings, Qdrant vector store indexing, FalkorDB openCypher knowledge graph upsert, and claim-to-chunk provenance.
 - **[ ] Phase 3: Grounding & Retrieval Service** — `/retrieve` and `/trace` endpoints, strict claim-citation contract.
 - **[ ] Phase 4: Output Generation Adapters** — LinkedIn, Twitter, Exec Summary, Advisory, Presentation, Video Package, Infographic.
 - **[ ] Phase 5: Security & Audit Layer** — RBAC, tamper-evident hash chain verification, network-cut live proof.

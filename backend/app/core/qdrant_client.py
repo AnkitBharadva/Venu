@@ -1,6 +1,7 @@
 """Qdrant client provider and vector store health check."""
 
 import logging
+import socket
 import time
 from typing import Any
 
@@ -13,15 +14,35 @@ logger = logging.getLogger("app.core.qdrant_client")
 settings = get_settings()
 
 
+def is_qdrant_live(timeout: float = 0.2) -> bool:
+    """Fast non-blocking probe to verify if Qdrant socket is actively listening."""
+    for host in (settings.QDRANT_HOST, "127.0.0.1"):
+        try:
+            with socket.create_connection((host, settings.QDRANT_PORT), timeout=timeout):
+                return True
+        except (TimeoutError, socket.gaierror, ConnectionRefusedError, OSError):
+            continue
+    return False
+
+
 def get_qdrant_client() -> QdrantClient:
     """Instantiate and return an air-gapped Qdrant client."""
+    # Determine accessible host
+    target_host = settings.QDRANT_HOST
+    try:
+        with socket.create_connection((settings.QDRANT_HOST, settings.QDRANT_PORT), timeout=0.1):
+            target_host = settings.QDRANT_HOST
+    except Exception:
+        target_host = "127.0.0.1"
+
     return QdrantClient(
-        host=settings.QDRANT_HOST,
+        host=target_host,
         port=settings.QDRANT_PORT,
         grpc_port=settings.QDRANT_GRPC_PORT,
         prefer_grpc=False,
         api_key=settings.QDRANT_API_KEY,
-        timeout=3,
+        timeout=1.0,
+        check_compatibility=False,
     )
 
 

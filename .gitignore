@@ -66,3 +66,5 @@ falkordb_data/
 logs/
 tmp/
 scratch/
+tmp_verification_uploads/
+*verification_uploads/

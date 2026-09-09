@@ -46,6 +46,8 @@ class SourceDocument(Base):
     updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
 
     outputs = relationship("GeneratedOutput", back_populates="source_document", cascade="all, delete-orphan")
+    chunks = relationship("DocumentChunk", back_populates="source_document", cascade="all, delete-orphan", order_by="DocumentChunk.chunk_index")
+    understanding = relationship("DocumentUnderstanding", back_populates="source_document", uselist=False, cascade="all, delete-orphan")
 
 
 ID_TYPE = BigInteger().with_variant(Integer, "sqlite")

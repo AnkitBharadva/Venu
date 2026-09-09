@@ -85,6 +85,46 @@ CREATE INDEX IF NOT EXISTS idx_generated_outputs_doc_id ON generated_outputs(doc
 CREATE INDEX IF NOT EXISTS idx_generated_outputs_status ON generated_outputs(status);
 CREATE INDEX IF NOT EXISTS idx_generated_outputs_type ON generated_outputs(deliverable_type);
 
+-- ------------------------------------------------------------------------------
+-- 4. Document Chunks (Phase 2: Grounding & Provenance)
+-- ------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS document_chunks (
+    chunk_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    doc_id UUID NOT NULL REFERENCES source_documents(doc_id) ON DELETE CASCADE,
+    chunk_index INT NOT NULL,
+    text TEXT NOT NULL,
+    char_offset_start INT NOT NULL,
+    char_offset_end INT NOT NULL,
+    page_number INT,
+    heading VARCHAR(512),
+    timestamp_start DOUBLE PRECISION,
+    timestamp_end DOUBLE PRECISION,
+    metadata_payload JSONB DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_document_chunks_doc_id ON document_chunks(doc_id);
+CREATE INDEX IF NOT EXISTS idx_document_chunks_index ON document_chunks(doc_id, chunk_index);
+CREATE INDEX IF NOT EXISTS idx_document_chunks_offsets ON document_chunks(doc_id, char_offset_start, char_offset_end);
+
+-- ------------------------------------------------------------------------------
+-- 5. Document Understandings (Phase 2: Intent, Topics, Entities, Sensitivities)
+-- ------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS document_understandings (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    doc_id UUID NOT NULL UNIQUE REFERENCES source_documents(doc_id) ON DELETE CASCADE,
+    objective TEXT NOT NULL,
+    topics JSONB NOT NULL DEFAULT '[]'::jsonb,
+    key_entities JSONB NOT NULL DEFAULT '[]'::jsonb,
+    sensitive_terms JSONB NOT NULL DEFAULT '[]'::jsonb,
+    relationships JSONB NOT NULL DEFAULT '[]'::jsonb,
+    summary TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_document_understandings_doc_id ON document_understandings(doc_id);
+
 -- Insert Genesis Audit Log Entry if empty
 INSERT INTO audit_log (actor, action, timestamp, details, prev_hash, hash)
 SELECT 
