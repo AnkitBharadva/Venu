@@ -18,6 +18,7 @@ from app.core.config import get_settings
 from app.core.database import check_postgres_health
 from app.core.falkordb_client import check_falkordb_health
 from app.core.qdrant_client import check_qdrant_health
+from app.services.llm.ollama_service import check_ollama_health
 
 router = APIRouter(prefix="", tags=["Health"])
 settings = get_settings()
@@ -34,13 +35,15 @@ async def get_overall_health(response: Response) -> dict[str, Any]:
     """
     # Execute checks concurrently for minimum latency
     pg_task = asyncio.create_task(check_postgres_health())
-    qdrant_task = asyncio.create_task(check_qdrant_health())
-    falkordb_task = asyncio.create_task(check_falkordb_health())
+    qd_task = asyncio.create_task(check_qdrant_health())
+    fk_task = asyncio.create_task(check_falkordb_health())
+    ol_task = asyncio.create_task(check_ollama_health())
 
-    results = await asyncio.gather(pg_task, qdrant_task, falkordb_task, return_exceptions=True)
+    results = await asyncio.gather(pg_task, qd_task, fk_task, ol_task, return_exceptions=True)
     postgres_res: Any = results[0]
     qdrant_res: Any = results[1]
     falkordb_res: Any = results[2]
+    ollama_res: Any = results[3]
 
     # Normalize responses in case of unhandled task exception
     def normalize_result(res: Any, service_name: str) -> dict[str, Any]:
@@ -55,10 +58,12 @@ async def get_overall_health(response: Response) -> dict[str, Any]:
     pg_norm = normalize_result(postgres_res, "postgres")
     qd_norm = normalize_result(qdrant_res, "qdrant")
     fk_norm = normalize_result(falkordb_res, "falkordb")
+    ol_norm = normalize_result(ollama_res, "ollama")
 
-    all_healthy = (
+    storage_healthy = (
         pg_norm.get("status") == "healthy" and qd_norm.get("status") == "healthy" and fk_norm.get("status") == "healthy"
     )
+    all_healthy = storage_healthy and (ol_norm.get("status") == "healthy" or not settings.OLLAMA_ENABLED)
 
     if not all_healthy and settings.ENVIRONMENT == "production":
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
@@ -72,6 +77,7 @@ async def get_overall_health(response: Response) -> dict[str, Any]:
             "postgres": pg_norm,
             "qdrant": qd_norm,
             "falkordb": fk_norm,
+            "ollama": ol_norm,
         },
     }
 
@@ -121,6 +127,15 @@ async def falkordb_health(response: Response) -> dict[str, Any]:
     """Individual health check for FalkorDB graph store."""
     res = await check_falkordb_health()
     if res["status"] != "healthy" and settings.ENVIRONMENT == "production":
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    return res
+
+
+@router.get("/health/ollama")
+async def ollama_health(response: Response) -> dict[str, Any]:
+    """Individual health check for Ollama local LLM runtime."""
+    res = await check_ollama_health()
+    if res["status"] not in ("healthy", "disabled") and settings.ENVIRONMENT == "production":
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
     return res
 

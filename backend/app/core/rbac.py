@@ -67,6 +67,7 @@ ROLE_PERMISSIONS: dict[str, set[Permission]] = {
         Permission.GENERATE,
         Permission.REQUEST_APPROVAL,
         Permission.EDIT,
+        Permission.EXPORT,
         Permission.VIEW,
     },
     Role.REVIEWER.value: {

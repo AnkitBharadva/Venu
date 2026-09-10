@@ -235,8 +235,21 @@ class SemanticChunker:
         sub_spans: list[tuple[int, int]] = []
         span_slice = text[span_start:span_end]
 
-        # Sentence end pattern: period, question, exclamation followed by space/newline or capital
-        sentence_ends = [m.end() for m in re.finditer(r"(?<=[.!?])(?:\s+|\n)", span_slice)]
+        # Sentence end pattern: period, question, exclamation followed by whitespace and uppercase/quote/bracket
+        sentence_ends = []
+        for m in re.finditer(r'([.!?]+)([\'"]?)(\s+|\n)(?=[A-Z0-9"\'\(\[\{]|\Z)', span_slice):
+            punct = m.group(1)
+            if punct == ".":
+                preceding = span_slice[:m.start(1)].strip()
+                last_word = re.split(r"[\s\(\[\{\'\"/]+", preceding)[-1].lower() if preceding else ""
+                if last_word in {
+                    "u.s", "u.k", "e.u", "u.n", "d.c", "adm", "gen", "col", "capt", "lt",
+                    "dr", "mr", "mrs", "ms", "e.g", "i.e", "vs", "etc", "dept", "inc", "corp"
+                }:
+                    continue
+                if re.search(r"\b[A-Za-z]\.[A-Za-z]$", preceding, re.IGNORECASE) or re.search(r"\b[A-Z]$", preceding):
+                    continue
+            sentence_ends.append(m.end())
 
         if not sentence_ends or sentence_ends[-1] != len(span_slice):
             sentence_ends.append(len(span_slice))

@@ -18,22 +18,19 @@ export const App: React.FC = () => {
                   SIH26155 &mdash; GenAI Content Transformation Platform
                 </h1>
                 <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-700/60 font-semibold">
-                  Phase 7: Operator Dashboard Active
+                  Air-Gapped &bull; 100% Offline
                 </span>
               </div>
               <p className="text-[11px] text-gray-400 hidden sm:block">
-                Fully offline, air-gapped GenAI transformation enclave with claim provenance
+                Autonomous multi-format content transformation with claim-to-source provenance
               </p>
             </div>
           </div>
 
-          <div className="flex items-center space-x-4">
-            <div className="hidden md:flex items-center space-x-2 text-xs font-mono text-gray-400 bg-gray-900/90 px-3 py-1.5 rounded-lg border border-gray-800">
-              <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-              <span>Enclave: Air-Gapped</span>
-            </div>
-            <div className="text-xs px-2.5 py-1 rounded bg-gray-800 border border-gray-700 font-mono text-gray-300">
-              Role: Operator
+          <div className="flex items-center space-x-3">
+            <div className="flex items-center space-x-2 text-xs font-mono text-gray-300 bg-gray-900/90 px-3 py-1.5 rounded-lg border border-gray-800">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+              <span>Enclave Isolated</span>
             </div>
           </div>
         </div>
@@ -51,8 +48,8 @@ export const App: React.FC = () => {
       {/* Footer */}
       <footer className="border-t border-gray-900 bg-gray-950 py-4 text-center text-xs text-gray-500 font-mono">
         <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
-          <div>SIH26155 GenAI Automated Content Transformation &bull; Zero External Network Calls</div>
-          <div className="text-gray-400">Phase 7: Operator Dashboard (End-to-End Enclave Active)</div>
+          <div>GenAI Automated Content Transformation &bull; Zero External Network Calls</div>
+          <div className="text-gray-400">Cryptographic Provenance &bull; AES-256-GCM Secured</div>
         </div>
       </footer>
     </div>

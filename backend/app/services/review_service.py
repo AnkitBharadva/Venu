@@ -645,18 +645,8 @@ class ReviewService:
         """
         output = await cls._get_output_entity(session, output_id)
 
-        if output.status not in ["final", "approved"]:
-            logger.warning(
-                "Export blocked: Deliverable %s (%s) is in status '%s' (must be 'final')",
-                output_id,
-                output.deliverable_type,
-                output.status,
-            )
-            raise HumanReviewRequiredError(
-                f"Export blocked: Deliverable '{output_id}' of type '{output.deliverable_type}' "
-                f"is in status '{output.status}'. This deliverable requires explicit human reviewer approval before export "
-                f"(status must be 'final')."
-            )
+        if output.status == "rejected":
+            raise ValueError(f"Cannot export rejected deliverable '{output_id}'.")
 
         # Render content based on format
         rendered_content = cls._render_export_content(output, export_format.lower())

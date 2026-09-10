@@ -118,10 +118,33 @@ class CitationLinker:
                 best_slice_end = sub_pos + len(chosen_sub_sentence)
                 best_quote = raw_text[best_slice_start:best_slice_end]
             else:
-                # Fallback to chunk boundaries
-                best_slice_start = best_chunk.char_offset_start
-                best_slice_end = best_chunk.char_offset_end
-                best_quote = best_chunk.text
+                # Flexible matching: search with arbitrary whitespace across newlines
+                words = re.findall(r"\S+", chosen_sub_sentence)
+                found_span = False
+                if len(words) >= 2:
+                    sub_text = raw_text[best_chunk.char_offset_start:best_chunk.char_offset_end + 300]
+                    # Try matching full words sequence
+                    full_pattern = r"\s+".join(re.escape(w) for w in words)
+                    m = re.search(full_pattern, sub_text)
+                    if m:
+                        best_slice_start = best_chunk.char_offset_start + m.start()
+                        best_slice_end = best_chunk.char_offset_start + m.end()
+                        best_quote = raw_text[best_slice_start:best_slice_end]
+                        found_span = True
+                    elif len(words) >= 4:
+                        prefix_pattern = r"\s+".join(re.escape(w) for w in words[:4])
+                        m_pre = re.search(prefix_pattern, sub_text)
+                        if m_pre:
+                            best_slice_start = best_chunk.char_offset_start + m_pre.start()
+                            best_slice_end = min(best_slice_start + len(chosen_sub_sentence) + 20, len(raw_text))
+                            best_quote = raw_text[best_slice_start:best_slice_end]
+                            found_span = True
+
+                if not found_span:
+                    # Fallback to chunk boundaries
+                    best_slice_start = best_chunk.char_offset_start
+                    best_slice_end = best_chunk.char_offset_end
+                    best_quote = best_chunk.text
         else:
             best_slice_start = best_chunk.char_offset_start
             best_slice_end = best_chunk.char_offset_end
@@ -183,6 +206,50 @@ class CitationLinker:
 
     @staticmethod
     def _split_into_sentences(text: str) -> list[str]:
-        """Split text into sentences while filtering noise."""
-        raw_sents = re.split(r"(?<=[.!?])\s+", text)
-        return [s.strip() for s in raw_sents if len(s.strip()) > 15]
+        """Split text into clean, complete sentences while respecting abbreviations, initials, and numbers."""
+        if not text or not text.strip():
+            return []
+
+        normalized = re.sub(r"\s+", " ", text).strip()
+
+        abbrevs = {
+            "mr", "mrs", "ms", "dr", "prof", "sr", "jr", "gen", "adm", "col",
+            "capt", "lt", "maj", "sgt", "gov", "sen", "rep", "pres", "rev", "hon",
+            "u.s", "u.k", "e.u", "u.n", "d.c", "st", "ave", "rd", "blvd",
+            "e.g", "i.e", "vs", "etc", "al", "approx", "est", "dept", "div",
+            "inc", "corp", "co", "ltd", "no", "vol", "pp", "p", "fig", "sec"
+        }
+
+        # Match punctuation followed by whitespace and capital letter / quote / bracket / end of text
+        pattern = re.compile(r'([.!?]+)([\'"]?)(\s+)(?=[A-Z0-9"\'\(\[\{]|\Z)')
+        sentences: list[str] = []
+        last_idx = 0
+
+        for match in pattern.finditer(normalized):
+            punct = match.group(1)
+            quote = match.group(2)
+            split_pos = match.start(1) + len(punct) + len(quote)
+            cand = normalized[last_idx:split_pos].strip()
+
+            if punct == ".":
+                preceding_text = normalized[last_idx:match.start(1)].strip()
+                last_word = re.split(r"[\s\(\[\{\'\"/]+", preceding_text)[-1].lower() if preceding_text else ""
+
+                if last_word in abbrevs:
+                    continue
+                if re.search(r"\b[A-Za-z]\.[A-Za-z]$", preceding_text, re.IGNORECASE):
+                    continue
+                if re.search(r"\b[A-Z]$", preceding_text):  # Single initial like Adm. J. Hayward
+                    continue
+
+            if len(cand) > 10:
+                sentences.append(cand)
+                last_idx = match.end()
+
+        remainder = normalized[last_idx:].strip()
+        if remainder and len(remainder) > 10:
+            sentences.append(remainder)
+        elif remainder and sentences:
+            sentences[-1] = f"{sentences[-1]} {remainder}".strip()
+
+        return sentences or ([normalized] if len(normalized) > 10 else [])

@@ -1,11 +1,15 @@
 """OCR Parser for Scanned Documents and Images (PaddleOCR & Vision extractors)."""
 
 import io
+import logging
 from typing import Any
 
 from PIL import Image, ImageStat
 
 from app.services.parsers.base import BaseParser, ParsedContent
+
+logger = logging.getLogger("app.services.parsers.ocr")
+
 
 # Check if PaddleOCR is available
 try:
@@ -75,11 +79,28 @@ class OCRParser(BaseParser):
         text_lines: list[str] = []
         confidences: list[float] = []
         bounding_boxes: list[dict[str, Any]] = []
+        used_parser = "VisualImageParser"
 
-        # 1. Execute PaddleOCR if installed
-        if self._ocr_engine is not None:
+        # 1. Execute local Vision OCR via Qwen3-VL multimodal model
+        try:
+            from app.services.llm.ollama_service import get_ollama_service
+
+            ollama = get_ollama_service()
+            if await ollama.is_available():
+                vision_text = await ollama.extract_text_from_image(file_bytes)
+                if vision_text and len(vision_text.strip()) > 5:
+                    extracted_text = vision_text.strip()
+                    text_lines = [l.strip() for l in extracted_text.splitlines() if l.strip()]
+                    confidences = [0.95] * max(1, len(text_lines))
+                    avg_conf = 0.95
+                    used_parser = "Qwen3-VLOllamaParser"
+                    logger.info("Successfully performed Vision OCR on '%s' (%d characters)", filename, len(extracted_text))
+        except Exception as v_exc:
+            logger.debug("Vision OCR pass skipped (%s), checking secondary engines", v_exc)
+
+        # 2. Execute PaddleOCR if installed and Vision OCR didn't run
+        if not text_lines and self._ocr_engine is not None:
             try:
-                # PaddleOCR expects numpy array or path
                 import numpy as np
 
                 img_np = np.array(img.convert("RGB"))
@@ -98,12 +119,15 @@ class OCRParser(BaseParser):
                                 "box": box,
                             }
                         )
+                    if text_lines:
+                        extracted_text = "\n".join(text_lines).strip()
+                        avg_conf = sum(confidences) / len(confidences)
+                        used_parser = "PaddleOCRParser"
             except Exception:
                 pass
 
-        # 2. Heuristic extraction fallback if OCR engine not loaded
+        # 3. Heuristic extraction fallback if no OCR text found
         if not text_lines:
-            # Generate structured visual metadata description
             aspect_ratio = round(width / max(1, height), 2)
             extracted_text = (
                 f"[Image Document: {filename}]\n"
@@ -112,9 +136,7 @@ class OCRParser(BaseParser):
                 f"Analysis: Clean visual document ingested into air-gapped pipeline."
             )
             avg_conf = 0.65 if (low_contrast or low_res) else 0.90
-        else:
-            extracted_text = "\n".join(text_lines).strip()
-            avg_conf = sum(confidences) / len(confidences) if confidences else 0.85
+
 
         # Surface low confidence flags to operator (Task 5)
         warnings: list[str] = []
@@ -136,14 +158,17 @@ class OCRParser(BaseParser):
             low_confidence = True
             warnings.append(f"Low image resolution ({width}x{height}px). Text legibility may be degraded.")
 
+        words = extracted_text.split()
         metadata: dict[str, Any] = {
-            "parser": "PaddleOCRParser" if self._ocr_engine else "VisualImageParser",
+            "parser": used_parser,
             "image_dimensions": {"width": width, "height": height},
             "format": img_format,
             "mode": img_mode,
             "contrast_rms": round(rms_contrast, 2),
             "brightness_mean": round(mean_brightness, 2),
             "total_pages": 1,
+            "word_count": len(words),
+            "char_count": len(extracted_text),
             "detected_regions": len(bounding_boxes),
             "bounding_boxes": bounding_boxes[:50],  # cap to prevent oversized metadata
         }

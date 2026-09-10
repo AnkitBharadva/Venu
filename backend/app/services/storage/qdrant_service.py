@@ -151,13 +151,23 @@ class QdrantService:
                         ]
                     )
 
-                search_res = client.search(
-                    collection_name=self.collection_name,
-                    query_vector=query_vector,
-                    query_filter=q_filter,
-                    limit=top_k,
-                    score_threshold=score_threshold,
-                )
+                if hasattr(client, "query_points"):
+                    query_response = client.query_points(
+                        collection_name=self.collection_name,
+                        query=query_vector,
+                        query_filter=q_filter,
+                        limit=top_k,
+                        score_threshold=score_threshold,
+                    )
+                    search_res = query_response.points
+                else:
+                    search_res = client.search(
+                        collection_name=self.collection_name,
+                        query_vector=query_vector,
+                        query_filter=q_filter,
+                        limit=top_k,
+                        score_threshold=score_threshold,
+                    )
 
                 for hit in search_res:
                     payload = hit.payload or {}

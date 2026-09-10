@@ -60,6 +60,13 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL_NAME: str = "BAAI/bge-small-en-v1.5"
     EMBEDDING_DIMENSION: int = 384
 
+    # Ollama Local LLM Runtime
+    OLLAMA_ENABLED: bool = True
+    OLLAMA_BASE_URL: str = "http://127.0.0.1:11434"
+    OLLAMA_MODEL: str = "hf.co/Qwen/Qwen3-VL-4B-Instruct-GGUF:latest"
+    OLLAMA_VISION_MODEL: str = "hf.co/Qwen/Qwen3-VL-4B-Instruct-GGUF:latest"
+    OLLAMA_TIMEOUT: float = 180.0
+
     # Frontend / Network
     FRONTEND_PORT: int = 3000
     BACKEND_PORT: int = 8000

@@ -14,6 +14,7 @@ from app.services.adapters.executive_summary_adapter import ExecutiveSummaryAdap
 from app.services.adapters.infographic_adapter import InfographicAdapter
 from app.services.adapters.linkedin_adapter import LinkedInPostAdapter
 from app.services.adapters.presentation_adapter import PresentationAdapter
+from app.services.adapters.technical_documentation_adapter import TechnicalDocumentationAdapter
 from app.services.adapters.twitter_adapter import TwitterThreadAdapter
 from app.services.adapters.video_package_adapter import VideoPackageAdapter
 
@@ -37,7 +38,7 @@ class AdapterRegistry:
         return cls._instance
 
     def _register_builtins(self) -> None:
-        """Register the 7 core built-in adapters."""
+        """Register the core built-in adapters."""
         builtins = [
             LinkedInPostAdapter(),
             TwitterThreadAdapter(),
@@ -46,6 +47,7 @@ class AdapterRegistry:
             PresentationAdapter(),
             VideoPackageAdapter(),
             InfographicAdapter(),
+            TechnicalDocumentationAdapter(),
         ]
         for adapter in builtins:
             self.register(adapter)

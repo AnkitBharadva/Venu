@@ -85,8 +85,10 @@ class AdapterOrchestrationService:
             adapter = registry.get_adapter(dtype)
             active_adapters.append(adapter)
 
-        # 6. Execute adapters concurrently
-        async def run_adapter(adapter: BaseDeliverableAdapter) -> tuple[BaseDeliverableAdapter, AdapterOutput]:
+        # 6. Execute adapters in sequence to give each deliverable format dedicated local GPU inference
+        generated_outputs: list[tuple[BaseDeliverableAdapter, AdapterOutput]] = []
+        for adapter in active_adapters:
+            logger.info("Generating format '%s' (%s) for doc %s", adapter.name, adapter.deliverable_type, request.doc_id)
             out = await adapter.generate(
                 source_doc_id=request.doc_id,
                 retrieved_chunks=grounded_context.retrieved_chunks,
@@ -95,10 +97,7 @@ class AdapterOrchestrationService:
                 doc_summary=doc_summary,
                 key_entities=entities,
             )
-            return adapter, out
-
-        tasks = [run_adapter(a) for a in active_adapters]
-        generated_outputs: list[tuple[BaseDeliverableAdapter, AdapterOutput]] = await asyncio.gather(*tasks)
+            generated_outputs.append((adapter, out))
 
         # 7. Validate each deliverable against the hard contract and persist to DB
         deliverable_responses: list[DeliverableResponse] = []

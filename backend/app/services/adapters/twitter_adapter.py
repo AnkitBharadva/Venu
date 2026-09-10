@@ -1,13 +1,15 @@
 """Twitter/X Thread Deliverable Adapter for Phase 4.
 
-Generates concise, punchy Twitter threads featuring:
-- Hook-first introductory tweet
-- Sequential numbering (1/N, 2/N, etc.)
-- Strict character limit enforcement (<= 280 characters per tweet)
-- 100% claim-to-chunk provenance linking
+Generates structured multi-part Twitter thread featuring:
+- Strict character count enforcement: <= 280 characters per tweet
+- Numbered parts (e.g. "1/4", "2/4", ...)
+- Engaging hook, core evidence tweets, and call-to-action conclusion
+- Powered by local air-gapped LLM with robust fallback
+- 100% claim-to-chunk provenance linking per tweet
 """
 
 import logging
+import re
 import uuid
 
 from app.schemas.adapters import GenerationParameters
@@ -24,13 +26,24 @@ logger = logging.getLogger("app.services.adapters.twitter")
 
 
 class TwitterThreadAdapter(BaseDeliverableAdapter):
-    """Generates sequentially numbered, char-limited Twitter/X threads."""
+    """Generates structured Twitter/X threads with strict 280-character limit per tweet."""
 
     deliverable_type = "twitter_thread"
     name = "Twitter / X Thread"
-    description = "Sequential, character-capped (280 char) Twitter/X thread with hook-first opening and grounded narrative."
+    description = "Multi-part social thread with strict 280-character tweet constraints, numbered parts, and 100% claim provenance."
     category = "social"
     requires_human_review = False
+    system_prompt_template = (
+        "You are a Digital Communications Strategist who turns dense briefing material into sharp, "
+        "factually-anchored social threads. Your job is stylistic compression, not embellishment — "
+        "every punchy line still has to be true to the source.\n\n"
+        "Tone: Crisp, energetic, incisive. No academic hedging, no passive voice — but also no "
+        "invented statistics or dramatized claims the source material doesn't support. Punchy and "
+        "accurate are not in tension; if a fact isn't punchy enough on its own, find the truest "
+        "sharp phrasing for it rather than exaggerating it.\n\n"
+        "Hard constraint: every tweet strictly under 230 characters. Count before finalizing each "
+        "tweet; if one runs long, cut words, don't run past the limit."
+    )
 
     async def generate(
         self,
@@ -41,78 +54,133 @@ class TwitterThreadAdapter(BaseDeliverableAdapter):
         doc_summary: str | None = None,
         key_entities: list[str] | None = None,
     ) -> AdapterOutput:
-        """Synthesize 4-part numbered Twitter thread with strict 280-char cap per tweet."""
+        """Synthesize 3-to-4 part numbered Twitter thread with strict 280-char cap per tweet."""
         if not retrieved_chunks:
             raise ValueError("No retrieved chunks available to ground Twitter thread.")
 
-        chunks = retrieved_chunks[:4]
-        total_tweets = len(chunks)
+        target_tweet_count = 4 if len(retrieved_chunks) >= 3 else 3
         blocks: list[GroundedBlock] = []
         tweet_character_counts: list[int] = []
 
-        for idx, chunk in enumerate(chunks):
-            tweet_num = idx + 1
-            prefix = f"{tweet_num}/{total_tweets} "
+        # 1. Query local Ollama LLM
+        llm_prompt = self.build_prompt(
+            retrieved_chunks=retrieved_chunks,
+            params=params,
+            extra_instructions=(
+                f"Write a {target_tweet_count}-part thread for {params.audience}, as exactly {target_tweet_count} "
+                "tweets separated by blank lines. Do not prepend numbering like \"1/4\" — the system adds "
+                "that automatically.\n\n"
+                "- Tweet 1 (Hook): the single most attention-grabbing true fact from the source context, "
+                "framed as a hook — not a vague teaser, an actual specific finding.\n"
+                "- Middle tweet(s) (Evidence): 1-2 sentences each, hard facts and figures taken directly "
+                "from the source context. If the source context has fewer distinct facts than tweets "
+                "requested, it is acceptable to have a shorter thread rather than pad with restatement.\n"
+                f"- Final tweet (Takeaway): a forward-looking conclusion or call-to-action for {params.audience} "
+                "that follows logically from the evidence tweets — not a generic \"stay tuned\" close.\n\n"
+                f"Every tweet ≤ 230 characters, verified by count before output. Tone: '{params.tone}'."
+            ),
+        )
+        llm_text = await self.generate_with_llm(prompt=llm_prompt, max_tokens=400, temperature=0.6)
 
-            # Extract clean main clause from chunk text
-            first_clause = chunk.text.strip().split(".")[0].strip()
+        llm_tweets: list[str] = []
+        if llm_text:
+            lines = [re.sub(r"^(Tweet\s*\d+:?|\d+[/.]\d*|\d+[.)])\s*", "", l.strip()) for l in llm_text.splitlines() if len(l.strip()) > 15]
+            if len(lines) >= 2:
+                llm_tweets = lines[:target_tweet_count]
 
-            if tweet_num == 1:
-                # Hook tweet
-                body = f"THREAD: Critical intelligence briefing on {chunk.heading or 'operational mandates'}. {first_clause}."
-            elif tweet_num == total_tweets:
-                # Conclusion & CTA tweet
-                body = f"CONCLUSION: {first_clause}. Full report verified with zero-egress cryptographic audit trail."
-            else:
-                # Context / Evidence tweet
-                body = f"Key finding: {first_clause}."
+        if llm_tweets:
+            actual_count = len(llm_tweets)
+            for idx, raw_tweet in enumerate(llm_tweets):
+                tweet_num = idx + 1
+                prefix = f"{tweet_num}/{actual_count} "
+                target_chunk = retrieved_chunks[min(idx, len(retrieved_chunks) - 1)]
 
-            # Strict 280-character enforcement
-            full_tweet = f"{prefix}{body}"
-            if len(full_tweet) > 275:
-                # Truncate body to fit inside 270 chars + ellipsis
-                available_len = 270 - len(prefix)
-                body = body[:available_len].rstrip() + "..."
+                body = raw_tweet
+                if len(prefix + body) > 275:
+                    available = 270 - len(prefix)
+                    body = body[:available].rstrip() + "..."
                 full_tweet = f"{prefix}{body}"
+                tweet_character_counts.append(len(full_tweet))
 
-            tweet_character_counts.append(len(full_tweet))
-
-            # Citation linking
-            cit = CitationLinker.link_sentence(
-                sentence_text=body,
-                retrieved_chunks=retrieved_chunks,
-                raw_text=raw_text,
-                preferred_chunk_id=chunk.chunk_id,
-            )
-
-            sentence = GroundedSentence(
-                sentence_id=f"tweet_{tweet_num}",
-                sentence_index=idx,
-                text=full_tweet,
-                citations=[cit],
-            )
-
-            blocks.append(
-                GroundedBlock(
-                    block_index=idx,
-                    title=f"Tweet {tweet_num}/{total_tweets}",
-                    sentences=[sentence],
+                cit = CitationLinker.link_sentence(
+                    sentence_text=body,
+                    retrieved_chunks=retrieved_chunks,
+                    raw_text=raw_text,
+                    preferred_chunk_id=target_chunk.chunk_id,
                 )
-            )
+                blocks.append(
+                    GroundedBlock(
+                        block_index=idx,
+                        title=f"Tweet {tweet_num}/{actual_count}",
+                        sentences=[
+                            GroundedSentence(
+                                sentence_id=f"tweet_{tweet_num}",
+                                sentence_index=idx,
+                                text=full_tweet,
+                                citations=[cit],
+                            )
+                        ],
+                    )
+                )
+        else:
+            # Deterministic fallback synthesis
+            for idx in range(target_tweet_count):
+                tweet_num = idx + 1
+                prefix = f"{tweet_num}/{target_tweet_count} "
+                chunk = retrieved_chunks[min(idx, len(retrieved_chunks) - 1)]
 
-        title = f"Thread: {chunks[0].heading or 'Strategic Intelligence Mandate'}"
+                first_clause = self.extract_clean_sentence(chunk.text, f"operational phase {tweet_num}").rstrip(".")
+
+                if tweet_num == 1:
+                    body = f"THREAD: Strategic assessment regarding {chunk.heading or 'operational directives'}. {first_clause}."
+                elif tweet_num == target_tweet_count:
+                    body = f"CONCLUSION: {first_clause}. Verifiable under air-gapped cryptographic integrity."
+                else:
+                    body = f"Key operational finding: {first_clause}."
+
+                full_tweet = f"{prefix}{body}"
+                if len(full_tweet) > 275:
+                    available_len = 270 - len(prefix)
+                    body = body[:available_len].rstrip() + "..."
+                    full_tweet = f"{prefix}{body}"
+
+                tweet_character_counts.append(len(full_tweet))
+
+                cit = CitationLinker.link_sentence(
+                    sentence_text=body,
+                    retrieved_chunks=retrieved_chunks,
+                    raw_text=raw_text,
+                    preferred_chunk_id=chunk.chunk_id,
+                )
+                blocks.append(
+                    GroundedBlock(
+                        block_index=idx,
+                        title=f"Tweet {tweet_num}/{target_tweet_count}",
+                        sentences=[
+                            GroundedSentence(
+                                sentence_id=f"tweet_{tweet_num}",
+                                sentence_index=idx,
+                                text=full_tweet,
+                                citations=[cit],
+                            )
+                        ],
+                    )
+                )
+
+        title = f"Thread: {retrieved_chunks[0].heading or 'Strategic Intelligence Mandate'}"
         content = GroundedDeliverableContent(
             title=title,
-            summary=f"A {total_tweets}-part Twitter/X thread with strict 280-char limit enforcement and chunk grounding.",
+            summary=f"Structured {len(blocks)}-part Twitter/X thread with strict character limits and 100% claim provenance.",
             blocks=blocks,
         )
 
         format_metadata = {
-            "target_platform": "Twitter / X",
-            "thread_length": total_tweets,
-            "max_character_limit": 280,
-            "tweet_character_counts": tweet_character_counts,
+            "thread_length": len(blocks),
+            "max_tweet_length": max(tweet_character_counts) if tweet_character_counts else 0,
+            "all_under_280": all(c <= 280 for c in tweet_character_counts),
             "all_within_limit": all(c <= 280 for c in tweet_character_counts),
+            "character_counts": tweet_character_counts,
+            "suggested_hashtags": ["#AirGapAI", "#GenAI", "#CyberDefense", "#InfoSec"],
         }
 
         return AdapterOutput(

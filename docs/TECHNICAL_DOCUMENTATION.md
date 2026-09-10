@@ -433,9 +433,11 @@ MIME types are resolved by inspecting leading magic byte sequences before fallin
 * **PPTX Engine:** `pptx.Presentation`. Iterates through slides, extracting slide titles, body text frames, and table cells with slide number index mapping.
 
 #### 2. `OCRParser` ([`app/services/parsers/ocr_parser.py`](file:///D:/Venu/backend/app/services/parsers/ocr_parser.py))
-* Designed for scanned operational reports, tactical charts, and reconnaissance photos.
-* Pre-processes images using PIL/Pillow (grayscale conversion, auto-contrast thresholding).
-* Executes local PaddleOCR inference to extract bounding boxes and text spans with confidence scoring. Flags `low_confidence = True` if score $< 0.70$.
+* Designed for scanned operational reports, tactical charts, diagrams, and reconnaissance photos.
+* Pre-processes images using PIL/Pillow (grayscale conversion, auto-contrast, brightness, and dimensions analysis).
+* Executes local Vision-Language Model OCR (`Qwen3-VL-4B-Instruct` via Ollama) with 100% GPU acceleration.
+* Extracts tabular layouts, structured headers, and clean verbatim text with confidence metrics (default 0.95). Flags `low_confidence = True` if contrast RMS < 25.0.
+* Integrated into `DoclingParser`: Scanned PDF pages with sparse font streams automatically trigger Qwen3-VL OCR on embedded page images.
 
 #### 3. `WhisperParser` ([`app/services/parsers/whisper_parser.py`](file:///D:/Venu/backend/app/services/parsers/whisper_parser.py))
 * Decodes audio streams (WAV, MP3, MP4 audio channels) locally via OpenAI Whisper (`Whisper-medium.en`).
@@ -595,23 +597,24 @@ async def generate(
 * `style`: Optional formatting modifier.
 * `custom_instructions`: Operator-defined constraints.
 
-### 8.2 The 7 Built-In Deliverable Adapters
+### 8.2 The 8 Built-In Deliverable Adapters
 
 ```
 +----------------------------------------------------------------------------------------------------+
-|                                    7 BUILT-IN DELIVERABLE ADAPTERS                                 |
-+----+--------------------+---------------+----------------------------------------------------------+
-| #  | Deliverable Type   | Category      | Key Structural Characteristics                           |
-+----+--------------------+---------------+----------------------------------------------------------+
-| 1  | linkedin_post      | Social        | Hook sentence, value blocks, call-to-action, hashtags.   |
-| 2  | twitter_thread     | Social        | Threaded numbered tweets (1/N), 280 char limit checks.   |
-| 3  | executive_summary  | Executive     | 150-300 word briefing, Key Findings, Strategic Impact.   |
-| 4  | advisory           | Operational   | Summary, Details, Risk Assessment, Recommended Actions.  |
-|    |                    |               | [MANDATORY HUMAN REVIEW: export_locked: true]            |
-| 5  | presentation       | Presentation  | Slide deck JSON: slide titles, bullets, speaker notes.   |
-| 6  | video_package      | Multimedia    | Audio/Visual split scripts, voiceover narration, B-roll. |
-| 7  | infographic        | Visual        | Headline, key data callouts, color palette, panel specs. |
-+----+--------------------+---------------+----------------------------------------------------------+
+|                                    8 BUILT-IN DELIVERABLE ADAPTERS                                 |
++----+-------------------------+---------------+-----------------------------------------------------+
+| #  | Deliverable Type        | Category      | Key Structural Characteristics                      |
++----+-------------------------+---------------+-----------------------------------------------------+
+| 1  | linkedin_post           | Social        | Hook sentence, value blocks, call-to-action, tags.  |
+| 2  | twitter_thread          | Social        | Threaded numbered tweets (1/N), 280 char enforcement|
+| 3  | executive_summary       | Executive     | 150-300 word briefing, Key Findings, Strategic Imp. |
+| 4  | advisory                | Operational   | Summary, Details, Risk Assessment, Recommended Act. |
+|    |                         |               | [MANDATORY HUMAN REVIEW: export_locked: true]       |
+| 5  | presentation            | Presentation  | Slide deck JSON: slide titles, bullets, speaker note|
+| 6  | video_package           | Multimedia    | Storyboard beats, voiceover narration, SRT subtitles|
+| 7  | infographic             | Visual        | Headline, process flow, architecture cards, metrics |
+| 8  | technical_documentation | Technical     | System scope, architecture, crypto envelope, runbook|
++----+-------------------------+---------------+-----------------------------------------------------+
 ```
 
 ### 8.3 Zero-Code Dynamic Adapter Registration

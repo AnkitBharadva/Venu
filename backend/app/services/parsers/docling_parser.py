@@ -50,7 +50,7 @@ class DoclingParser(BaseParser):
         lowered = filename.lower()
 
         if lowered.endswith(".pdf") or "pdf" in content_type.lower():
-            return self._parse_pdf(file_bytes, filename)
+            return await self._parse_pdf(file_bytes, filename)
         elif lowered.endswith((".docx", ".doc")) or "word" in content_type.lower():
             return self._parse_docx(file_bytes, filename)
         elif (
@@ -62,7 +62,7 @@ class DoclingParser(BaseParser):
         else:
             raise ValueError(f"DoclingParser cannot handle file type: {filename} ({content_type})")
 
-    def _parse_pdf(self, file_bytes: bytes, filename: str) -> ParsedContent:
+    async def _parse_pdf(self, file_bytes: bytes, filename: str) -> ParsedContent:
         """Parse PDF document extracting text per page and structural page bounds."""
         if not file_bytes.startswith(b"%PDF"):
             raise ValueError(f"Corrupted or invalid PDF header in '{filename}'. Expected '%PDF'.")
@@ -81,10 +81,31 @@ class DoclingParser(BaseParser):
             extracted_text_chunks: list[str] = []
             headings: list[dict[str, Any]] = []
             current_offset = 0
+            ocr_pages_count = 0
 
             for page_idx, page in enumerate(reader.pages, start=1):
                 page_text = (page.extract_text() or "").strip()
+
+                # If page has little or no embedded text, attempt local Vision OCR on embedded page images
+                if len(page_text) < 30 and hasattr(page, "images") and page.images:
+                    try:
+                        from app.services.llm.ollama_service import get_ollama_service
+
+                        ollama = get_ollama_service()
+                        if await ollama.is_available():
+                            ocr_results = []
+                            for img_item in page.images:
+                                v_res = await ollama.extract_text_from_image(img_item.data)
+                                if v_res and len(v_res.strip()) > 5:
+                                    ocr_results.append(v_res.strip())
+                            if ocr_results:
+                                page_text = "\n".join(ocr_results).strip()
+                                ocr_pages_count += 1
+                    except Exception:
+                        pass
+
                 page_len = len(page_text)
+
 
                 # Look for potential section headings (lines with short uppercase or prominent titles)
                 for line in page_text.split("\n"):
@@ -114,27 +135,34 @@ class DoclingParser(BaseParser):
             combined_text = "\n\n".join(extracted_text_chunks).strip()
             total_chars = len(combined_text)
 
-            # Check if PDF is scanned or image-only (low extracted text density)
+            # Check if PDF is scanned or image-only
             low_confidence = False
             confidence_score = 1.0
             warnings: list[str] = []
 
-            if total_chars < 30 * num_pages:
-                low_confidence = True
-                confidence_score = 0.45
-                warnings.append(
-                    f"Low text density detected ({total_chars} characters across {num_pages} pages). "
-                    "Document may be scanned or image-only. Recommend OCR extraction."
-                )
+            if ocr_pages_count > 0:
+                confidence_score = 0.95
+                parser_name = f"DoclingPDFParser+Qwen3VLOCR({ocr_pages_count}p)"
+            else:
+                parser_name = "DoclingPDFParser"
+                if total_chars < 30 * num_pages:
+                    low_confidence = True
+                    confidence_score = 0.45
+                    warnings.append(
+                        f"Low text density detected ({total_chars} characters across {num_pages} pages). "
+                        "Document may be scanned or image-only."
+                    )
 
             metadata: dict[str, Any] = {
-                "parser": "DoclingPDFParser",
+                "parser": parser_name,
                 "total_pages": num_pages,
+                "ocr_pages_count": ocr_pages_count,
                 "pages": pages_data,
                 "headings": headings,
                 "is_encrypted": reader.is_encrypted,
                 "char_count": total_chars,
             }
+
 
             return ParsedContent(
                 raw_text=combined_text if combined_text else "[Scanned / Image-Only PDF: No embedded text extracted]",
