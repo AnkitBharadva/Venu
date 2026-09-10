@@ -297,11 +297,81 @@ Returns connected entity graph, relationship types (`OPERATED_BY`, `STATIONED_AT
 
 ---
 
+## Phase 3 — Grounding & Retrieval Service API Reference
+
+### 1. Hybrid Vector-Graph Context Retrieval (`/retrieve`)
+```bash
+curl -X POST http://localhost:8000/api/v1/grounding/retrieve \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "air-gapped isolated security perimeter",
+    "doc_id": "<DOC_ID>",
+    "top_k": 4,
+    "include_graph": true,
+    "alpha": 0.7
+  }'
+```
+Merges Qdrant dense vector similarity (`alpha=0.7`) with FalkorDB openCypher entity neighborhood traversal (`1 - alpha = 0.3`). Returns ranked chunks with composite scores, entity overlaps, and aggregated context formatted with chunk headers for generation adapters.
+
+### 2. Register Deliverable with Hard Claim-Citation Contract (`/outputs`)
+```bash
+curl -X POST http://localhost:8000/api/v1/grounding/outputs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "doc_id": "<DOC_ID>",
+    "deliverable_type": "executive_summary",
+    "content": {
+      "title": "Tactical Executive Briefing",
+      "blocks": [{
+        "block_index": 0,
+        "title": "Perimeter Security",
+        "sentences": [{
+          "sentence_id": "sent_1",
+          "sentence_index": 0,
+          "text": "The platform operates in an air-gapped security perimeter with zero external network connectivity.",
+          "citations": [{
+            "chunk_id": "<CHUNK_ID>",
+            "char_offset_start": 0,
+            "char_offset_end": 105,
+            "quote": "The platform operates in an air-gapped security perimeter..."
+          }]
+        }]
+      }]
+    }
+  }'
+```
+**Hard Gatekeeper Enforcement:**
+- If any sentence contains **0 citations**, the request is immediately rejected with **HTTP 422 Unprocessable Entity** (`UncitedClaimViolationError`).
+- If a citation references a non-existent or foreign `chunk_id`, the request is rejected with **HTTP 422** (`InvalidCitationChunkError`).
+- If quote offsets fail verbatim verification against `raw_text[start:end]`, the request is rejected with **HTTP 422** (`GroundingQuoteMismatchError`).
+- On success: commits a cryptographically chained audit event (`create_grounded_deliverable`).
+
+### 3. Sentence Provenance Trace (`/trace`)
+```bash
+# Trace a specific sentence
+curl "http://localhost:8000/api/v1/grounding/trace?output_id=<OUTPUT_ID>&sentence_index=0"
+
+# Trace entire deliverable (100% sentence-by-sentence coverage)
+curl "http://localhost:8000/api/v1/grounding/trace/<OUTPUT_ID>/full"
+```
+Powers the UI **hover a sentence → see source paragraph** capability. Returns exact character offsets `[char_offset_start : char_offset_end]`, source chunk ID, section heading, page number, verbatim quote, surrounding document context (`context_before`, `context_after`), and `trace_verified: true`.
+
+### 4. Verification Suite & Standalone Verification Runner
+```powershell
+# Run backend pytest suite (33 passing unit/integration tests)
+conda run -n tri pytest backend/tests/ -v
+
+# Run standalone Phase 3 verification (10 sentences across 3 deliverables)
+conda run -n tri python scripts/verify_phase3.py
+```
+
+---
+
 ## Phase Roadmap
 - **[x] Phase 0: Repo Scaffolding & Environment** — Running skeleton with all 5 services stubbed, zero egress network, health checks, CI stub.
 - **[x] Phase 1: Ingestion Pipeline** — Multi-modal file router (Docling, PaddleOCR, Whisper), common SourceDocument schema, AES-256 encryption at rest, append-only tamper-evident audit logging, and low-confidence flags.
 - **[x] Phase 2: Understanding & Chunking Layer** — Semantic paragraph/section-aware chunking preserving exact character offsets, entity/topic/intent/sensitive terms extraction, 384-dim dense embeddings, Qdrant vector store indexing, FalkorDB openCypher knowledge graph upsert, and claim-to-chunk provenance.
-- **[ ] Phase 3: Grounding & Retrieval Service** — `/retrieve` and `/trace` endpoints, strict claim-citation contract.
+- **[x] Phase 3: Grounding & Retrieval Service** — `/retrieve` hybrid vector-graph endpoint, `/trace` sentence-level and full deliverable provenance endpoint, hard claim-citation contract gatekeeper (100% verified across 10 sentences and 3 output types), and React interactive hovercard inspector.
 - **[ ] Phase 4: Output Generation Adapters** — LinkedIn, Twitter, Exec Summary, Advisory, Presentation, Video Package, Infographic.
 - **[ ] Phase 5: Security & Audit Layer** — RBAC, tamper-evident hash chain verification, network-cut live proof.
 - **[ ] Phase 6: Human Review & Approval Workflow** — Draft state, sentence-level review, reviewer diff history, export lock.

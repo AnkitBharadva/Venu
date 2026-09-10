@@ -1,6 +1,20 @@
 """Pydantic schemas package."""
 
 from app.schemas.audit import AuditLogResponse, AuditVerificationResponse
+from app.schemas.grounding import (
+    CreateDeliverableRequest,
+    DeliverableResponse,
+    FullDeliverableTraceResponse,
+    GroundedBlock,
+    GroundedCitation,
+    GroundedContextResponse,
+    GroundedDeliverableContent,
+    GroundedSentence,
+    GroundingSourceSpan,
+    RetrievedChunkItem,
+    RetrievedGraphContext,
+    SentenceTraceResponse,
+)
 from app.schemas.source_document import (
     DocumentSummary,
     DocumentUploadResponse,
@@ -41,4 +55,16 @@ __all__ = [
     "GraphEdge",
     "GraphVisualizationResponse",
     "EntityGraphQueryResponse",
+    "GroundedCitation",
+    "GroundedSentence",
+    "GroundedBlock",
+    "GroundedDeliverableContent",
+    "CreateDeliverableRequest",
+    "RetrievedChunkItem",
+    "RetrievedGraphContext",
+    "GroundedContextResponse",
+    "GroundingSourceSpan",
+    "SentenceTraceResponse",
+    "FullDeliverableTraceResponse",
+    "DeliverableResponse",
 ]

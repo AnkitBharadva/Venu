@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.audit import router as audit_router
+from app.api.grounding import router as grounding_router
 from app.api.health import router as health_router
 from app.api.ingestion import router as ingestion_router
 from app.api.understanding import router as understanding_router
@@ -63,6 +64,7 @@ app.include_router(health_router)
 app.include_router(ingestion_router)
 app.include_router(audit_router)
 app.include_router(understanding_router)
+app.include_router(grounding_router)
 
 
 @app.get("/")
