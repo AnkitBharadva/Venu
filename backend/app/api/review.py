@@ -21,10 +21,15 @@ from app.core.rbac import Permission, UserContext, require_permission
 from app.schemas.grounding import DeliverableResponse
 from app.schemas.review import (
     ApprovalActionRequest,
+    EditHistoryItemResponse,
+    EditSentenceRequest,
     ExportDeliverableRequest,
     ExportDeliverableResponse,
     OutputEncryptionVerificationResponse,
+    OutputReviewSummaryResponse,
     RequestApprovalRequest,
+    ReviewSectionRequest,
+    ReviewSentenceRequest,
 )
 from app.services.grounding.output_service import GroundingOutputService
 from app.services.review_service import HumanReviewRequiredError, ReviewService
@@ -189,3 +194,113 @@ async def verify_output_encryption(
         )
     except ValueError as err:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(err)) from err
+
+
+@router.post(
+    "/outputs/{output_id}/edit-sentence",
+    response_model=DeliverableResponse,
+    summary="Reviewer edits a specific sentence (RBAC: EDIT permission required)",
+)
+async def edit_sentence(
+    output_id: uuid.UUID,
+    body: EditSentenceRequest,
+    session: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(require_permission(Permission.EDIT)),
+) -> DeliverableResponse:
+    """Edit sentence text with automatic before/after unified diff generation and immutable audit storage."""
+    try:
+        return await ReviewService.edit_sentence(
+            session=session,
+            output_id=output_id,
+            sentence_id=body.sentence_id,
+            new_text=body.new_text,
+            actor=user.user_id,
+            notes=body.notes,
+        )
+    except ValueError as err:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(err)) from err
+
+
+@router.post(
+    "/outputs/{output_id}/review-sentence",
+    response_model=DeliverableResponse,
+    summary="Reviewer accepts or rejects an individual sentence",
+)
+async def review_sentence(
+    output_id: uuid.UUID,
+    body: ReviewSentenceRequest,
+    session: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(require_permission(Permission.APPROVE)),
+) -> DeliverableResponse:
+    """Record reviewer acceptance or rejection on a specific sentence with audit history tracking."""
+    try:
+        return await ReviewService.review_sentence(
+            session=session,
+            output_id=output_id,
+            sentence_id=body.sentence_id,
+            decision=body.decision,
+            actor=user.user_id,
+            notes=body.notes,
+        )
+    except ValueError as err:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(err)) from err
+
+
+@router.post(
+    "/outputs/{output_id}/review-section",
+    response_model=DeliverableResponse,
+    summary="Reviewer accepts or rejects an entire content section",
+)
+async def review_section(
+    output_id: uuid.UUID,
+    body: ReviewSectionRequest,
+    session: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(require_permission(Permission.APPROVE)),
+) -> DeliverableResponse:
+    """Record reviewer decision on an entire content block."""
+    try:
+        return await ReviewService.review_section(
+            session=session,
+            output_id=output_id,
+            block_index=body.block_index,
+            decision=body.decision,
+            actor=user.user_id,
+            notes=body.notes,
+        )
+    except ValueError as err:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(err)) from err
+
+
+@router.get(
+    "/outputs/{output_id}/history",
+    response_model=list[EditHistoryItemResponse],
+    summary="Retrieve full chronological audit diff history for a deliverable",
+)
+async def get_deliverable_history(
+    output_id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(require_permission(Permission.VIEW)),
+) -> list[EditHistoryItemResponse]:
+    """Inspect all historical edits, unified diffs, reviewer decisions, and timestamps."""
+    try:
+        return await ReviewService.get_edit_history(session=session, output_id=output_id)
+    except ValueError as err:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(err)) from err
+
+
+@router.get(
+    "/outputs/{output_id}/summary",
+    response_model=OutputReviewSummaryResponse,
+    summary="Retrieve review status metrics and export eligibility for a deliverable",
+)
+async def get_deliverable_review_summary(
+    output_id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(require_permission(Permission.VIEW)),
+) -> OutputReviewSummaryResponse:
+    """Returns accepted/rejected/edited/pending sentence counts and export eligibility."""
+    try:
+        return await ReviewService.get_review_summary(session=session, output_id=output_id)
+    except ValueError as err:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(err)) from err
+

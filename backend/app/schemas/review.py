@@ -62,3 +62,61 @@ class OutputEncryptionVerificationResponse(BaseModel):
     deliverable_type: str | None = None
     status: str | None = None
     error: str | None = None
+
+
+class EditSentenceRequest(BaseModel):
+    """Reviewer edit payload for modifying a specific sentence with diff tracking."""
+
+    sentence_id: str = Field(..., description="ID of the sentence being modified (e.g. sent_0_1)")
+    new_text: str = Field(..., min_length=1, description="Replacement text for the sentence")
+    notes: str | None = Field(default=None, description="Reviewer justification or editorial notes")
+
+
+class ReviewSentenceRequest(BaseModel):
+    """Reviewer decision payload for accepting or rejecting a single sentence."""
+
+    sentence_id: str = Field(..., description="ID of the sentence being reviewed")
+    decision: str = Field(..., description="'accept' or 'reject'")
+    notes: str | None = Field(default=None, description="Reviewer comments or compliance notes")
+
+
+class ReviewSectionRequest(BaseModel):
+    """Reviewer decision payload for accepting or rejecting an entire content block."""
+
+    block_index: int = Field(..., ge=0, description="Zero-based index of the section/block")
+    decision: str = Field(..., description="'accept' or 'reject'")
+    notes: str | None = Field(default=None, description="Reviewer comments or compliance notes")
+
+
+class EditHistoryItemResponse(BaseModel):
+    """Individual audit diff item showing before/after state and unified diff."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    output_id: uuid.UUID
+    version: int
+    actor: str
+    action: str
+    target_type: str
+    target_id: str | None = None
+    target_index: int | None = None
+    before_content: str
+    after_content: str
+    diff_summary: str | None = None
+    timestamp: datetime
+
+
+class OutputReviewSummaryResponse(BaseModel):
+    """Reviewer summary metrics for a deliverable."""
+
+    output_id: uuid.UUID
+    status: str
+    total_sentences: int
+    accepted_sentences: int
+    rejected_sentences: int
+    edited_sentences: int
+    pending_sentences: int
+    can_export: bool
+    history_count: int
+

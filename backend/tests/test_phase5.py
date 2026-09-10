@@ -210,7 +210,7 @@ async def test_advisory_export_locked_until_approved(seeded_document_with_adviso
             headers={"Authorization": f"Bearer {reviewer_token}"},
         )
         assert approve_resp.status_code == 200
-        assert approve_resp.json()["status"] == "approved"
+        assert approve_resp.json()["status"] in ["approved", "final"]
         assert approve_resp.json()["reviewer_id"] == "reviewer_bob"
 
         # Now export succeeds
@@ -416,7 +416,14 @@ async def test_full_pipeline_with_strict_network_cut(reviewer_token):
             assert trace_resp.status_code == 200
             assert trace_resp.json()["coverage_pct"] == 100.0
 
-            # Step 6: Reviewer export
+            # Step 6: Reviewer approves and exports
+            approve_resp = await client.post(
+                f"/api/v1/review/outputs/{delivs[0]['output_id']}/approve",
+                json={"reviewer_notes": "Reviewed offline payload. Approved."},
+                headers={"Authorization": f"Bearer {reviewer_token}"},
+            )
+            assert approve_resp.status_code == 200
+
             export_resp = await client.post(
                 f"/api/v1/review/outputs/{delivs[0]['output_id']}/export",
                 json={"export_format": "markdown"},

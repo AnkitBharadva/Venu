@@ -125,6 +125,27 @@ CREATE TABLE IF NOT EXISTS document_understandings (
 
 CREATE INDEX IF NOT EXISTS idx_document_understandings_doc_id ON document_understandings(doc_id);
 
+-- ------------------------------------------------------------------------------
+-- 6. Output Edit History (Phase 6: Human Review Diffs & Edit Audit)
+-- ------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS output_edit_history (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    output_id UUID NOT NULL REFERENCES generated_outputs(output_id) ON DELETE CASCADE,
+    version INT NOT NULL DEFAULT 1,
+    actor VARCHAR(128) NOT NULL,
+    action VARCHAR(64) NOT NULL,
+    target_type VARCHAR(32) NOT NULL,
+    target_id VARCHAR(128),
+    target_index INT,
+    before_content TEXT NOT NULL,
+    after_content TEXT NOT NULL,
+    diff_summary TEXT,
+    timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_output_edit_history_output_id ON output_edit_history(output_id);
+CREATE INDEX IF NOT EXISTS idx_output_edit_history_timestamp ON output_edit_history(timestamp DESC);
+
 -- Insert Genesis Audit Log Entry if empty
 INSERT INTO audit_log (actor, action, timestamp, details, prev_hash, hash)
 SELECT 
@@ -135,3 +156,4 @@ SELECT
     '0000000000000000000000000000000000000000000000000000000000000000',
     encode(digest('0000000000000000000000000000000000000000000000000000000000000000:system_bootstrap:system_initialization:genesis', 'sha256'), 'hex')
 WHERE NOT EXISTS (SELECT 1 FROM audit_log LIMIT 1);
+

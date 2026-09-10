@@ -86,3 +86,36 @@ class GeneratedOutput(Base):
     updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
 
     source_document = relationship("SourceDocument", back_populates="outputs")
+    edit_history = relationship(
+        "OutputEditHistory",
+        back_populates="output",
+        cascade="all, delete-orphan",
+        order_by="OutputEditHistory.timestamp.asc()",
+    )
+
+
+class OutputEditHistory(Base):
+    """Immutable audit diff record of every reviewer edit and sentence/section review action."""
+
+    __tablename__ = "output_edit_history"
+
+    id = Column(UUID_TYPE, primary_key=True, default=uuid.uuid4)
+    output_id = Column(
+        UUID_TYPE,
+        ForeignKey("generated_outputs.output_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    version = Column(Integer, nullable=False, default=1)
+    actor = Column(String(128), nullable=False, index=True)
+    action = Column(String(64), nullable=False, index=True)  # 'edit_sentence', 'accept_sentence', 'reject_sentence', etc.
+    target_type = Column(String(32), nullable=False)  # 'sentence', 'section', 'deliverable'
+    target_id = Column(String(128), nullable=True)  # sentence_id or section_index
+    target_index = Column(Integer, nullable=True)
+    before_content = Column(Text, nullable=False)
+    after_content = Column(Text, nullable=False)
+    diff_summary = Column(Text, nullable=True)
+    timestamp = Column(DateTime(timezone=True), default=utc_now, nullable=False, index=True)
+
+    output = relationship("GeneratedOutput", back_populates="edit_history")
+

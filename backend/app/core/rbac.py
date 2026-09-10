@@ -51,6 +51,7 @@ class Permission(str, Enum):
     APPROVE = "approve"
     REJECT = "reject"
     EXPORT = "export"
+    EDIT = "edit"
     AUDIT_VIEW = "audit_view"
     VIEW = "view"
     ADMIN = "admin"
@@ -65,6 +66,7 @@ ROLE_PERMISSIONS: dict[str, set[Permission]] = {
         Permission.TRACE,
         Permission.GENERATE,
         Permission.REQUEST_APPROVAL,
+        Permission.EDIT,
         Permission.VIEW,
     },
     Role.REVIEWER.value: {
@@ -72,6 +74,7 @@ ROLE_PERMISSIONS: dict[str, set[Permission]] = {
         Permission.RETRIEVE,
         Permission.TRACE,
         Permission.REQUEST_APPROVAL,
+        Permission.EDIT,
         Permission.APPROVE,
         Permission.REJECT,
         Permission.EXPORT,
@@ -82,6 +85,7 @@ ROLE_PERMISSIONS: dict[str, set[Permission]] = {
         Permission.RETRIEVE,
         Permission.TRACE,
         Permission.REQUEST_APPROVAL,
+        Permission.EDIT,
         Permission.APPROVE,
         Permission.REJECT,
         Permission.EXPORT,
@@ -94,6 +98,7 @@ ROLE_PERMISSIONS: dict[str, set[Permission]] = {
         Permission.TRACE,
         Permission.GENERATE,
         Permission.REQUEST_APPROVAL,
+        Permission.EDIT,
         Permission.APPROVE,
         Permission.REJECT,
         Permission.EXPORT,
@@ -102,6 +107,7 @@ ROLE_PERMISSIONS: dict[str, set[Permission]] = {
         Permission.ADMIN,
     },
 }
+
 
 
 @dataclass

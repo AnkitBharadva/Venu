@@ -8,6 +8,7 @@ Implements:
 5. Tamper-evident cryptographic audit logging on all review and export actions.
 """
 
+import difflib
 import html
 import json
 import logging
@@ -17,12 +18,18 @@ from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.audit import record_audit_event
 from app.core.security import compute_sha256, save_encrypted_file
-from app.models.audit_log import GeneratedOutput, SourceDocument
+from app.models.audit_log import GeneratedOutput, OutputEditHistory, SourceDocument
 from app.schemas.grounding import DeliverableResponse
-from app.schemas.review import ExportDeliverableResponse, OutputEncryptionVerificationResponse
+from app.schemas.review import (
+    EditHistoryItemResponse,
+    ExportDeliverableResponse,
+    OutputEncryptionVerificationResponse,
+    OutputReviewSummaryResponse,
+)
 from app.services.grounding.output_service import GroundingOutputService
 from app.services.security.output_encryption import (
     _get_output_storage_dir,
@@ -90,6 +97,392 @@ class ReviewService:
         return cls._format_response(output)
 
     @classmethod
+    async def edit_sentence(
+        cls,
+        session: AsyncSession,
+        output_id: uuid.UUID,
+        sentence_id: str,
+        new_text: str,
+        actor: str = "reviewer",
+        notes: str | None = None,
+    ) -> DeliverableResponse:
+        """Reviewer edits a specific sentence with unified diff tracking and cryptographic audit entry."""
+        output = await cls._get_output_entity(session, output_id)
+
+        content = dict(output.content or {})
+        blocks = list(content.get("blocks", []))
+        found_sentence = None
+        old_text = ""
+        target_sentence_idx = None
+
+        for block in blocks:
+            for s_idx, sentence in enumerate(block.get("sentences", [])):
+                if sentence.get("sentence_id") == sentence_id:
+                    found_sentence = sentence
+                    old_text = sentence.get("text", "")
+                    target_sentence_idx = s_idx
+                    break
+            if found_sentence:
+                break
+
+        if not found_sentence:
+            raise ValueError(f"Sentence '{sentence_id}' not found in deliverable '{output_id}'.")
+
+        now = datetime.now(UTC)
+
+        # Generate unified diff
+        diff_lines = list(
+            difflib.unified_diff(
+                old_text.splitlines(keepends=True),
+                new_text.splitlines(keepends=True),
+                fromfile="before",
+                tofile="after",
+            )
+        )
+        diff_summary = "".join(diff_lines) if diff_lines else f"- {old_text}\n+ {new_text}"
+
+        # Update sentence object in content
+        found_sentence["text"] = new_text
+        found_sentence["review_status"] = "edited"
+        found_sentence["last_edited_by"] = actor
+        found_sentence["last_edited_at"] = now.isoformat()
+        if notes:
+            found_sentence["reviewer_notes"] = notes
+
+        # Flag mutated content for SQLAlchemy
+        content["blocks"] = blocks
+        output.content = content
+        flag_modified(output, "content")
+
+        # Determine version
+        stmt = select(OutputEditHistory).where(OutputEditHistory.output_id == output_id)
+        res = await session.execute(stmt)
+        existing_history = res.scalars().all()
+        version = len(existing_history) + 1
+
+        # Store OutputEditHistory record
+        history_entry = OutputEditHistory(
+            output_id=output.output_id,
+            version=version,
+            actor=actor,
+            action="edit_sentence",
+            target_type="sentence",
+            target_id=sentence_id,
+            target_index=target_sentence_idx,
+            before_content=old_text,
+            after_content=new_text,
+            diff_summary=diff_summary,
+            timestamp=now,
+        )
+        session.add(history_entry)
+
+        # Re-encrypt deliverable payload at rest
+        enc_path = save_encrypted_output(
+            output_id=output.output_id,
+            doc_id=output.doc_id,
+            deliverable_type=output.deliverable_type,
+            status=output.status,
+            content=output.content,
+            citations=output.citations or [],
+            format_metadata=output.format_metadata,
+            reviewer_id=output.reviewer_id,
+            reviewer_notes=output.reviewer_notes,
+        )
+        output.encrypted_file_path = enc_path
+
+        # Chained cryptographic audit entry
+        await record_audit_event(
+            session=session,
+            actor=actor,
+            action="edit_sentence",
+            doc_id=output.doc_id,
+            output_id=output.output_id,
+            details={
+                "sentence_id": sentence_id,
+                "version": version,
+                "before": old_text,
+                "after": new_text,
+                "diff_summary": diff_summary,
+                "notes": notes,
+            },
+        )
+
+        await session.commit()
+        await session.refresh(output)
+
+        logger.info(
+            "Sentence %s in deliverable %s edited by %s (v%d)",
+            sentence_id,
+            output_id,
+            actor,
+            version,
+        )
+        return cls._format_response(output)
+
+    @classmethod
+    async def review_sentence(
+        cls,
+        session: AsyncSession,
+        output_id: uuid.UUID,
+        sentence_id: str,
+        decision: str,
+        actor: str = "reviewer",
+        notes: str | None = None,
+    ) -> DeliverableResponse:
+        """Reviewer accepts or rejects a single sentence with audit history tracking."""
+        decision_clean = decision.lower().strip()
+        if decision_clean not in ["accept", "reject"]:
+            raise ValueError(f"Invalid sentence review decision: '{decision}'. Must be 'accept' or 'reject'.")
+
+        output = await cls._get_output_entity(session, output_id)
+
+        content = dict(output.content or {})
+        blocks = list(content.get("blocks", []))
+        found_sentence = None
+        target_sentence_idx = None
+
+        for block in blocks:
+            for s_idx, sentence in enumerate(block.get("sentences", [])):
+                if sentence.get("sentence_id") == sentence_id:
+                    found_sentence = sentence
+                    target_sentence_idx = s_idx
+                    break
+            if found_sentence:
+                break
+
+        if not found_sentence:
+            raise ValueError(f"Sentence '{sentence_id}' not found in deliverable '{output_id}'.")
+
+        now = datetime.now(UTC)
+        before_status = found_sentence.get("review_status", "pending")
+        new_status = "accepted" if decision_clean == "accept" else "rejected"
+
+        found_sentence["review_status"] = new_status
+        found_sentence["reviewed_by"] = actor
+        found_sentence["reviewed_at"] = now.isoformat()
+        if notes:
+            found_sentence["reviewer_notes"] = notes
+
+        content["blocks"] = blocks
+        output.content = content
+        flag_modified(output, "content")
+
+        # Determine version
+        stmt = select(OutputEditHistory).where(OutputEditHistory.output_id == output_id)
+        res = await session.execute(stmt)
+        version = len(res.scalars().all()) + 1
+
+        history_entry = OutputEditHistory(
+            output_id=output.output_id,
+            version=version,
+            actor=actor,
+            action=f"{decision_clean}_sentence",
+            target_type="sentence",
+            target_id=sentence_id,
+            target_index=target_sentence_idx,
+            before_content=before_status,
+            after_content=new_status,
+            diff_summary=f"Sentence {sentence_id} marked as '{new_status}' by {actor}. Notes: {notes or 'N/A'}",
+            timestamp=now,
+        )
+        session.add(history_entry)
+
+        # Re-encrypt deliverable payload at rest
+        enc_path = save_encrypted_output(
+            output_id=output.output_id,
+            doc_id=output.doc_id,
+            deliverable_type=output.deliverable_type,
+            status=output.status,
+            content=output.content,
+            citations=output.citations or [],
+            format_metadata=output.format_metadata,
+            reviewer_id=output.reviewer_id,
+            reviewer_notes=output.reviewer_notes,
+        )
+        output.encrypted_file_path = enc_path
+
+        # Chained cryptographic audit entry
+        await record_audit_event(
+            session=session,
+            actor=actor,
+            action=f"{decision_clean}_sentence",
+            doc_id=output.doc_id,
+            output_id=output.output_id,
+            details={
+                "sentence_id": sentence_id,
+                "decision": decision_clean,
+                "before_status": before_status,
+                "new_status": new_status,
+                "notes": notes,
+            },
+        )
+
+        await session.commit()
+        await session.refresh(output)
+
+        logger.info("Sentence %s in deliverable %s %sed by %s", sentence_id, output_id, decision_clean, actor)
+        return cls._format_response(output)
+
+    @classmethod
+    async def review_section(
+        cls,
+        session: AsyncSession,
+        output_id: uuid.UUID,
+        block_index: int,
+        decision: str,
+        actor: str = "reviewer",
+        notes: str | None = None,
+    ) -> DeliverableResponse:
+        """Reviewer accepts or rejects an entire content section."""
+        decision_clean = decision.lower().strip()
+        if decision_clean not in ["accept", "reject"]:
+            raise ValueError(f"Invalid section review decision: '{decision}'. Must be 'accept' or 'reject'.")
+
+        output = await cls._get_output_entity(session, output_id)
+
+        content = dict(output.content or {})
+        blocks = list(content.get("blocks", []))
+
+        if block_index < 0 or block_index >= len(blocks):
+            raise ValueError(f"Block index {block_index} out of bounds for deliverable with {len(blocks)} blocks.")
+
+        target_block = blocks[block_index]
+        now = datetime.now(UTC)
+        new_status = "accepted" if decision_clean == "accept" else "rejected"
+        target_block["review_status"] = new_status
+        target_block["reviewed_by"] = actor
+        target_block["reviewed_at"] = now.isoformat()
+
+        # Update all sentences in this block as well
+        for sentence in target_block.get("sentences", []):
+            sentence["review_status"] = new_status
+            sentence["reviewed_by"] = actor
+            sentence["reviewed_at"] = now.isoformat()
+
+        content["blocks"] = blocks
+        output.content = content
+        flag_modified(output, "content")
+
+        # Determine version
+        stmt = select(OutputEditHistory).where(OutputEditHistory.output_id == output_id)
+        res = await session.execute(stmt)
+        version = len(res.scalars().all()) + 1
+
+        history_entry = OutputEditHistory(
+            output_id=output.output_id,
+            version=version,
+            actor=actor,
+            action=f"{decision_clean}_section",
+            target_type="section",
+            target_id=str(block_index),
+            target_index=block_index,
+            before_content=target_block.get("title", f"Section {block_index}"),
+            after_content=new_status,
+            diff_summary=f"Section #{block_index} ({target_block.get('title', 'Section')}) marked as '{new_status}' by {actor}.",
+            timestamp=now,
+        )
+        session.add(history_entry)
+
+        # Re-encrypt deliverable payload at rest
+        enc_path = save_encrypted_output(
+            output_id=output.output_id,
+            doc_id=output.doc_id,
+            deliverable_type=output.deliverable_type,
+            status=output.status,
+            content=output.content,
+            citations=output.citations or [],
+            format_metadata=output.format_metadata,
+            reviewer_id=output.reviewer_id,
+            reviewer_notes=output.reviewer_notes,
+        )
+        output.encrypted_file_path = enc_path
+
+        # Chained cryptographic audit entry
+        await record_audit_event(
+            session=session,
+            actor=actor,
+            action=f"{decision_clean}_section",
+            doc_id=output.doc_id,
+            output_id=output.output_id,
+            details={
+                "block_index": block_index,
+                "section_title": target_block.get("title"),
+                "decision": decision_clean,
+                "new_status": new_status,
+                "notes": notes,
+            },
+        )
+
+        await session.commit()
+        await session.refresh(output)
+
+        return cls._format_response(output)
+
+    @classmethod
+    async def get_edit_history(
+        cls,
+        session: AsyncSession,
+        output_id: uuid.UUID,
+    ) -> list[EditHistoryItemResponse]:
+        """Fetch chronological diff audit trail for an output deliverable."""
+        await cls._get_output_entity(session, output_id)
+
+        stmt = (
+            select(OutputEditHistory)
+            .where(OutputEditHistory.output_id == output_id)
+            .order_by(OutputEditHistory.timestamp.asc())
+        )
+        res = await session.execute(stmt)
+        records = res.scalars().all()
+        return [EditHistoryItemResponse.model_validate(r) for r in records]
+
+    @classmethod
+    async def get_review_summary(
+        cls,
+        session: AsyncSession,
+        output_id: uuid.UUID,
+    ) -> OutputReviewSummaryResponse:
+        """Compute review stats: accepted, rejected, edited, pending counts."""
+        output = await cls._get_output_entity(session, output_id)
+
+        content = output.content or {}
+        blocks = content.get("blocks", [])
+        total_sents = 0
+        accepted_sents = 0
+        rejected_sents = 0
+        edited_sents = 0
+        pending_sents = 0
+
+        for block in blocks:
+            for s in block.get("sentences", []):
+                total_sents += 1
+                rev_status = s.get("review_status", "pending")
+                if rev_status == "accepted":
+                    accepted_sents += 1
+                elif rev_status == "rejected":
+                    rejected_sents += 1
+                elif rev_status == "edited":
+                    edited_sents += 1
+                else:
+                    pending_sents += 1
+
+        stmt = select(OutputEditHistory).where(OutputEditHistory.output_id == output_id)
+        res = await session.execute(stmt)
+        history_count = len(res.scalars().all())
+
+        return OutputReviewSummaryResponse(
+            output_id=output.output_id,
+            status=output.status,
+            total_sentences=total_sents,
+            accepted_sentences=accepted_sents,
+            rejected_sentences=rejected_sents,
+            edited_sentences=edited_sents,
+            pending_sentences=pending_sents,
+            can_export=(output.status in ["final", "approved"]),
+            history_count=history_count,
+        )
+
+    @classmethod
     async def approve_deliverable(
         cls,
         session: AsyncSession,
@@ -97,11 +490,12 @@ class ReviewService:
         reviewer_id: str,
         reviewer_notes: str | None = None,
     ) -> DeliverableResponse:
-        """Authorized reviewer approves the deliverable, unlocking export authorization."""
+        """Authorized reviewer approves the deliverable, transitioning status to 'final' and unlocking export."""
         output = await cls._get_output_entity(session, output_id)
 
         now = datetime.now(UTC)
-        output.status = "approved"
+        previous_status = output.status
+        output.status = "final"
         output.reviewer_id = reviewer_id
         output.reviewer_notes = reviewer_notes
         output.approved_at = now
@@ -125,6 +519,25 @@ class ReviewService:
         )
         output.encrypted_file_path = enc_path
 
+        # Record approval in edit history
+        stmt_hist = select(OutputEditHistory).where(OutputEditHistory.output_id == output_id)
+        res_hist = await session.execute(stmt_hist)
+        version = len(res_hist.scalars().all()) + 1
+
+        history_entry = OutputEditHistory(
+            output_id=output.output_id,
+            version=version,
+            actor=reviewer_id,
+            action="approve_deliverable",
+            target_type="deliverable",
+            target_id=str(output_id),
+            before_content=previous_status,
+            after_content="final",
+            diff_summary=f"Deliverable approved by reviewer {reviewer_id}. Status transitioned to 'final'. Export unlocked.",
+            timestamp=now,
+        )
+        session.add(history_entry)
+
         # Cryptographic audit entry
         await record_audit_event(
             session=session,
@@ -135,14 +548,14 @@ class ReviewService:
             details={
                 "deliverable_type": output.deliverable_type,
                 "reviewer_notes": reviewer_notes,
-                "status": "approved",
+                "status": "final",
                 "approved_at": now.isoformat(),
             },
         )
         await session.commit()
         await session.refresh(output)
 
-        logger.info("Deliverable %s approved by reviewer %s", output_id, reviewer_id)
+        logger.info("Deliverable %s approved by reviewer %s (status -> 'final')", output_id, reviewer_id)
         return cls._format_response(output)
 
     @classmethod
@@ -156,6 +569,7 @@ class ReviewService:
         """Authorized reviewer rejects the deliverable, locking export and returning notes."""
         output = await cls._get_output_entity(session, output_id)
 
+        previous_status = output.status
         output.status = "rejected"
         output.reviewer_id = reviewer_id
         output.reviewer_notes = reviewer_notes
@@ -178,6 +592,25 @@ class ReviewService:
             reviewer_notes=reviewer_notes,
         )
         output.encrypted_file_path = enc_path
+
+        # Record reject in edit history
+        stmt_hist = select(OutputEditHistory).where(OutputEditHistory.output_id == output_id)
+        res_hist = await session.execute(stmt_hist)
+        version = len(res_hist.scalars().all()) + 1
+
+        history_entry = OutputEditHistory(
+            output_id=output.output_id,
+            version=version,
+            actor=reviewer_id,
+            action="reject_deliverable",
+            target_type="deliverable",
+            target_id=str(output_id),
+            before_content=previous_status,
+            after_content="rejected",
+            diff_summary=f"Deliverable rejected by reviewer {reviewer_id}. Notes: {reviewer_notes or 'N/A'}",
+            timestamp=datetime.now(UTC),
+        )
+        session.add(history_entry)
 
         # Cryptographic audit entry
         await record_audit_event(
@@ -206,27 +639,24 @@ class ReviewService:
         actor: str = "reviewer",
         export_format: str = "markdown",
     ) -> ExportDeliverableResponse:
-        """Render and export an authorized deliverable with AES-256 encrypted archive storage."""
+        """Render and export an authorized deliverable with AES-256 encrypted archive storage.
+        
+        Phase 6 Mandate: Export endpoint only serves 'final' status outputs. Attempting to export
+        a 'draft' (or 'rejected') output fails with a clear error.
+        """
         output = await cls._get_output_entity(session, output_id)
 
-        # Gatekeeper: check whether deliverable requires human review
-        format_meta = output.format_metadata or {}
-        requires_review = (
-            format_meta.get("requires_human_review", False)
-            or output.deliverable_type == "advisory"
-        )
-
-        if requires_review and output.status != "approved":
+        if output.status not in ["final", "approved"]:
             logger.warning(
-                "Export blocked: Deliverable %s (%s) is in status '%s' but requires human review",
+                "Export blocked: Deliverable %s (%s) is in status '%s' (must be 'final')",
                 output_id,
                 output.deliverable_type,
                 output.status,
             )
             raise HumanReviewRequiredError(
                 f"Export blocked: Deliverable '{output_id}' of type '{output.deliverable_type}' "
-                f"is safety-critical and requires explicit human reviewer approval before export. "
-                f"Current status: '{output.status}'."
+                f"is in status '{output.status}'. This deliverable requires explicit human reviewer approval before export "
+                f"(status must be 'final')."
             )
 
         # Render content based on format

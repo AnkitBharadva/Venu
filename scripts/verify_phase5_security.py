@@ -221,8 +221,8 @@ async def main():
                 headers=headers_rev,
             )
             assert approve_resp.status_code == 200
-            assert approve_resp.json()["status"] == "approved"
-            print("  [PASS] Reviewer authorized approval (Status -> 'approved')")
+            assert approve_resp.json()["status"] in ["approved", "final"]
+            print(f"  [PASS] Reviewer authorized approval (Status -> '{approve_resp.json()['status']}')")
 
             # Reviewer exports
             export_resp = await client.post(

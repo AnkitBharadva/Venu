@@ -64,12 +64,14 @@ class GroundingOutputService:
         # 4. Encrypt deliverable payload at rest (AES-256-GCM)
         output_id = uuid.uuid4()
         format_meta = dict(request.format_metadata)
+        format_meta["review_status"] = "pending"
+        format_meta["export_locked"] = True
         content_dict = request.content.model_dump(mode="json")
         encrypted_path = save_encrypted_output(
             output_id=output_id,
             doc_id=request.doc_id,
             deliverable_type=request.deliverable_type,
-            status="verified",
+            status="draft",
             content=content_dict,
             citations=flat_citations,
             format_metadata=format_meta,
@@ -77,12 +79,12 @@ class GroundingOutputService:
         )
         format_meta["encrypted_file_path"] = encrypted_path
 
-        # 5. Persist GeneratedOutput entity
+        # 5. Persist GeneratedOutput entity (starts in status 'draft' per Phase 6 mandate)
         new_output = GeneratedOutput(
             output_id=output_id,
             doc_id=request.doc_id,
             deliverable_type=request.deliverable_type,
-            status="verified",
+            status="draft",
             content=content_dict,
             citations=flat_citations,
             format_metadata=format_meta,
