@@ -15,6 +15,7 @@ from app.api.audit import router as audit_router
 from app.api.grounding import router as grounding_router
 from app.api.health import router as health_router
 from app.api.ingestion import router as ingestion_router
+from app.api.review import router as review_router
 from app.api.understanding import router as understanding_router
 from app.core.config import get_settings
 
@@ -67,6 +68,7 @@ app.include_router(audit_router)
 app.include_router(understanding_router)
 app.include_router(grounding_router)
 app.include_router(adapters_router)
+app.include_router(review_router)
 
 
 @app.get("/")

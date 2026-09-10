@@ -15,6 +15,7 @@ from app.models.audit_log import GeneratedOutput, SourceDocument
 from app.models.understanding import DocumentChunk
 from app.schemas.grounding import CreateDeliverableRequest, DeliverableResponse
 from app.services.grounding.contract_enforcer import GroundingContractEnforcer
+from app.services.security.output_encryption import save_encrypted_output
 
 logger = logging.getLogger("app.services.grounding.output")
 
@@ -60,21 +61,37 @@ class GroundingOutputService:
         # Count total sentences across blocks
         total_sentences = sum(len(b.sentences) for b in request.content.blocks)
 
-        # 4. Persist GeneratedOutput entity
+        # 4. Encrypt deliverable payload at rest (AES-256-GCM)
         output_id = uuid.uuid4()
+        format_meta = dict(request.format_metadata)
+        content_dict = request.content.model_dump(mode="json")
+        encrypted_path = save_encrypted_output(
+            output_id=output_id,
+            doc_id=request.doc_id,
+            deliverable_type=request.deliverable_type,
+            status="verified",
+            content=content_dict,
+            citations=flat_citations,
+            format_metadata=format_meta,
+            reviewer_id=request.reviewer_id,
+        )
+        format_meta["encrypted_file_path"] = encrypted_path
+
+        # 5. Persist GeneratedOutput entity
         new_output = GeneratedOutput(
             output_id=output_id,
             doc_id=request.doc_id,
             deliverable_type=request.deliverable_type,
             status="verified",
-            content=request.content.model_dump(mode="json"),
+            content=content_dict,
             citations=flat_citations,
-            format_metadata=request.format_metadata,
+            format_metadata=format_meta,
+            encrypted_file_path=encrypted_path,
             reviewer_id=request.reviewer_id,
         )
         session.add(new_output)
 
-        # 5. Cryptographic Append-Only Audit Entry
+        # 6. Cryptographic Append-Only Audit Entry
         audit_details = {
             "deliverable_type": request.deliverable_type,
             "title": request.content.title,
@@ -162,8 +179,10 @@ class GroundingOutputService:
             content=output.content,
             citations=output.citations or [],
             format_metadata=output.format_metadata or {},
+            encrypted_file_path=getattr(output, "encrypted_file_path", None),
             reviewer_id=output.reviewer_id,
             reviewer_notes=output.reviewer_notes,
+            approved_at=output.approved_at,
             total_sentences=total_sentences,
             total_citations=total_citations,
             contract_verified=True,

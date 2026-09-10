@@ -45,8 +45,13 @@ async def prepare_database(tmp_path):
     """Set up fresh database tables and isolated encrypted uploads directory for each test."""
     test_upload_dir = tmp_path / "encrypted_uploads"
     test_upload_dir.mkdir(parents=True, exist_ok=True)
+    test_output_dir = tmp_path / "encrypted_outputs"
+    test_output_dir.mkdir(parents=True, exist_ok=True)
 
-    with patch.object(get_settings(), "UPLOAD_STORAGE_PATH", str(test_upload_dir)):
+    with (
+        patch.object(get_settings(), "UPLOAD_STORAGE_PATH", str(test_upload_dir)),
+        patch.object(get_settings(), "OUTPUT_STORAGE_PATH", str(test_output_dir)),
+    ):
         async with test_engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         yield

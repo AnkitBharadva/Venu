@@ -78,6 +78,7 @@ class GeneratedOutput(Base):
     content = Column(JSON_TYPE, nullable=False)
     citations = Column(JSON_TYPE, nullable=False, default=list)
     format_metadata = Column(JSON_TYPE, default=dict)
+    encrypted_file_path = Column(String(1024), nullable=True)
     reviewer_id = Column(String(128), nullable=True)
     reviewer_notes = Column(Text, nullable=True)
     approved_at = Column(DateTime(timezone=True), nullable=True)

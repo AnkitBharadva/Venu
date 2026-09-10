@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     AIRGAP_STRICT_MODE: bool = True
     STORAGE_ENCRYPTION_KEY: str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
     UPLOAD_STORAGE_PATH: str = "/data/encrypted_uploads"
+    OUTPUT_STORAGE_PATH: str = "/data/encrypted_outputs"
 
     # PostgreSQL
     POSTGRES_SERVER: str = "postgres"

@@ -192,4 +192,5 @@ async def verify_encryption_at_rest(
         "sample_hex_preview": raw_disk_bytes[:32].hex(),
         "decryption_successful": len(decrypted) > 0,
         "checksum_matches": doc.checksum == __import__("hashlib").sha256(decrypted).hexdigest(),
+        "encrypted_at_rest": not is_plain and len(decrypted) > 0,
     }

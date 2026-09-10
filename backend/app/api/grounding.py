@@ -130,6 +130,11 @@ async def trace_sentence(
 
 
 @router.get(
+    "/trace/{output_id}",
+    response_model=FullDeliverableTraceResponse,
+    include_in_schema=False,
+)
+@router.get(
     "/trace/{output_id}/full",
     response_model=FullDeliverableTraceResponse,
     summary="Complete deliverable sentence-by-sentence trace and verification report",

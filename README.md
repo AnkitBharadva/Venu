@@ -427,11 +427,83 @@ curl -X POST http://localhost:8000/api/v1/generate/adapters/register \
 
 ### 4. Verification Suite & Standalone Verification Runner
 ```powershell
-# Run complete backend pytest suite (42 passing unit & integration tests)
+# Run complete backend pytest suite (52 passing unit & integration tests)
 conda run -n tri pytest backend/tests/ -v
 
 # Run standalone Phase 4 verification (all formats generated & traced)
 conda run -n tri python scripts/verify_phase4.py
+```
+
+---
+
+## Phase 5 — Defence-Grade Security & Cryptographic Audit Layer
+
+Phase 5 transforms the platform's air-gap and defence-grade security claims from assertions into verifiable, mathematically proven mechanisms.
+
+```
+                  ┌──────────────────────────────────────────────────────────┐
+                  │                 AIR-GAPPED DEFENCE ENCLAVE                │
+                  │                                                          │
+                  │  [ OPERATOR (Alice) ]        [ REVIEWER / APPROVER (Bob) ]│
+                  │         │                                  │             │
+                  │         ▼                                  ▼             │
+                  │  Ingest & Generate               Review & Authorization  │
+                  │  (403 on Approve/Export)         (Approve, Reject, Export)│
+                  │         │                                  │             │
+                  └─────────┼──────────────────────────────────┼─────────────┘
+                            │                                  │
+                            ▼                                  ▼
+               ┌─────────────────────────┐        ┌─────────────────────────┐
+               │   AES-256-GCM Storage   │        │   Linear Hash Chain     │
+               │   (Uploads + Outputs)   │        │   (Append-Only Audit)   │
+               │  96-bit Nonce + AuthTag │        │   Tamper-Evident SHA256 │
+               └─────────────────────────┘        └─────────────────────────┘
+```
+
+### 1. Role-Based Access Control (RBAC) & Dual-Control Separation of Duties
+A formal dual-control security model enforced at the API route layer via FastAPI dependency injection (`require_permission` and `require_role`).
+
+| Role | Permitted Actions | Prohibited Actions (HTTP 403 Forbidden) |
+|---|---|---|
+| `operator` | Upload, Ingest, Chunk, Understand, Generate (multi-select), Request Review | Approve deliverables, Reject deliverables, Export artifacts |
+| `reviewer` | Inspect deliverables, Request Review, Approve, Reject, Export authorized deliverables | Tamper with audit logs, bypass grounding contract |
+| `approver` | Final sign-off on safety-critical deliverables, Export | Direct generation bypass |
+| `admin` | Full system audit verification, enclave health monitoring, key rotation | Direct un-grounded claim injection |
+
+Authentication is supported through two interchangeable methods:
+1. **HMAC-SHA256 Signed JWT Tokens:** Cryptographically signed session tokens (`Authorization: Bearer <token>`) with 1-hour expiration and subject role claims.
+2. **Explicit Enclave Headers:** `X-User-Role` and `X-User-Id` headers for intra-service / dashboard mesh communication.
+
+### 2. Append-Only Tamper-Evident Linear Hash Chain
+Every sensitive state change (document upload, generation request, edit, review request, approval, rejection, and export) writes an immutable row to the `audit_log` table.
+- **Postgres DB Triggers:** Reject all `UPDATE` and `DELETE` queries on `audit_log`.
+- **Chained Cryptographic Formula:**
+  $$\text{Hash}_i = \text{SHA-256}(\text{Hash}_{i-1} \parallel \text{actor} \parallel \text{action} \parallel \text{doc\_id} \parallel \text{output\_id} \parallel \text{timestamp} \parallel \text{source\_hash} \parallel \text{details})$$
+- **Tamper Detection (`/api/v1/audit/verify-chain`):** Sequentially recomputes every hash from the genesis block. If an attacker modifies even a single byte or timestamp directly in the database, the recalculated hash fails and pinpoints the exact corrupted row ID.
+
+### 3. Authenticated Encryption at Rest (AES-256-GCM)
+- **Source Uploads (Phase 1):** Encrypted with authenticated AES-256-GCM before writing to `/data/encrypted_uploads`.
+- **Generated Outputs & Exports (Phase 5):** Structured deliverable JSON and final exported documents (.md, .json, .html, .txt) are encrypted with unique 96-bit random nonces and 128-bit authentication tags before writing to `/data/encrypted_outputs`.
+- Plaintext exists only ephemerally in RAM during generation and is never written to disk unencrypted.
+- **Verification Endpoint (`GET /api/v1/review/outputs/{output_id}/verify-encryption`):** Inspects the raw disk ciphertext, verifies the authenticated GCM tag, and returns the ciphertext SHA-256 hash.
+
+### 4. Safety-Critical Advisory Gatekeeper & Human Review Lock
+Outputs categorized as safety-critical (`advisory` or `requires_human_review: true`) are locked with `export_locked: true`. Calling `POST /api/v1/review/outputs/{output_id}/export` on an unapproved advisory immediately aborts with `HTTP 403 Forbidden` (`HumanReviewRequiredError`). Only formal reviewer approval via `POST /api/v1/review/outputs/{output_id}/approve` unlocks export authorization.
+
+### 5. Network Isolation & Dependency Tree Audit
+- **Dependency Audit:** Comprehensive audit of `backend/requirements.txt` and `frontend/package.json` proving zero external telemetry, tracking, or cloud SDKs (no AWS, Azure, GCP, OpenAI, Anthropic, Sentry, or Google Analytics). Documented in detail in [`docs/security_audit_report.md`](docs/security_audit_report.md).
+- **Automated Network Cut Proof:** The test suite intercepts all non-loopback socket connections at the OS socket layer (`socket.socket.connect`). Any external IP / port request raises an immediate `PermissionError`. The entire end-to-end pipeline executes 100% offline.
+
+### 6. Phase 5 Verification Commands
+```powershell
+# Run Phase 5 security unit & integration test suite (10/10 passing)
+conda run -n tri pytest backend/tests/test_phase5.py -v
+
+# Run all backend unit & integration tests (52/52 passing)
+conda run -n tri pytest backend/tests/ -v
+
+# Run comprehensive end-to-end Air-Gap Security Demonstration script
+conda run -n tri python scripts/verify_phase5_security.py
 ```
 
 ---
@@ -442,7 +514,8 @@ conda run -n tri python scripts/verify_phase4.py
 - **[x] Phase 2: Understanding & Chunking Layer** — Semantic paragraph/section-aware chunking preserving exact character offsets, entity/topic/intent/sensitive terms extraction, 384-dim dense embeddings, Qdrant vector store indexing, FalkorDB openCypher knowledge graph upsert, and claim-to-chunk provenance.
 - **[x] Phase 3: Grounding & Retrieval Service** — `/retrieve` hybrid vector-graph endpoint, `/trace` sentence-level and full deliverable provenance endpoint, hard claim-citation contract gatekeeper (100% verified across 10 sentences and 3 output types), and React interactive hovercard inspector.
 - **[x] Phase 4: Output Generation Adapters** — Common adapter interface, 7 modular adapters (LinkedIn, Twitter Thread, Executive Summary, Advisory, Presentation, Video Package, Infographic), dynamic config registration, multi-select concurrent generation, safety-critical human review gatekeeper, and interactive slide/storyboard/metric previews.
-- **[ ] Phase 5: Security & Audit Layer** — RBAC, tamper-evident hash chain verification, network-cut live proof.
+- **[x] Phase 5: Security & Audit Layer** — RBAC dual-control model (`operator` vs `reviewer`/`approver`), append-only SHA-256 cryptographic hash chaining with live tamper detection, AES-256-GCM encryption at rest for generated outputs/exports, socket-level air-gap egress cut proof, and zero-telemetry dependency audit.
 - **[ ] Phase 6: Human Review & Approval Workflow** — Draft state, sentence-level review, reviewer diff history, export lock.
 - **[ ] Phase 7: Operator Dashboard** — Complete interactive React UI with hover-to-source inspection.
 - **[ ] Phase 8: Testing, Hardening & Deliverables Packaging** — Architecture document, demo script, and final packaging.
+

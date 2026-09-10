@@ -7,6 +7,7 @@ Includes:
 """
 
 import uuid
+from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -164,8 +165,10 @@ class DeliverableResponse(BaseModel):
     content: dict[str, Any]
     citations: list[dict[str, Any]]
     format_metadata: dict[str, Any]
+    encrypted_file_path: str | None = None
     reviewer_id: str | None = None
     reviewer_notes: str | None = None
+    approved_at: datetime | None = None
     total_sentences: int = 0
     total_citations: int = 0
     contract_verified: bool = True
