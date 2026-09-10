@@ -576,6 +576,91 @@ conda run -n tri python scripts/verify_phase6_review.py
 
 ---
 
+## Phase 7 — Operator Dashboard (Frontend)
+
+Phase 7 delivers a military/defence-grade, fully integrated Operator Dashboard (React + Tailwind CSS) built to serve as the unified demo-facing surface for evaluation judges and operators. Every operation across Phases 1–6 is accessible visually with zero requirement to touch the command line or raw REST APIs.
+
+```
+  ┌─────────────────────────────────────────────────────────────────────────────────────────────────┐
+  │ 🟢 OFFLINE MODE: ACTIVE (Zero Outbound Egress) ── [🔍 Inspect Air-Gap Proof] ── Role: Operator/Bob│
+  └────────────────────────────────────────────────┬────────────────────────────────────────────────┘
+                                                   │
+     ┌──────────────────┬──────────────────────────┼─────────────────────────┬──────────────────────┐
+     ▼                  ▼                          ▼                         ▼                      ▼
+  [ 1. Ingestion ]   [ 2. Generation ]          [ 3. Human Review ]       [ 4. Audit Trail ]    [ 5. Security ]
+  - Drag-and-drop    - Multi-select (7 formats) - Inline sentence review  - Filterable table    - AES-256 Info
+  - Format detection - 6 transformation params  - Inline editing & diffs  - Search by actor/hash- Tamper demo
+  - Progress stages  - 4 quick preset buttons   - Formal approve/reject   - SHA-256 verification- Live socket
+  - 1-Click samples  - Hover/click /trace panel - Export final gatekeeper - JSON event inspector - Egress proof
+```
+
+### 1. Upload Screen & Multi-Modal Ingestion
+- **Drag-and-Drop Canvas & File-Type Detection**: Inspects file headers and extensions in real time to display format badges and routing engines (`PDF` via Docling, `DOCX` via Docling XML, `PPTX` via Slide Hierarchy, `PNG/JPG` via PaddleOCR, `WAV/MP3/MP4` via Whisper ASR, `TXT/MD` via Air-Gap Router).
+- **Multi-Stage Upload Progress Bar**: Dynamically reflects ingestion lifecycle:
+  - `Step 1/4 (25%)`: Reading file contents & computing raw SHA-256 checksum.
+  - `Step 2/4 (50%)`: Enclave AES-256-GCM encryption & secure disk storage.
+  - `Step 3/4 (75%)`: Semantic parsing & normalized `SourceDocument` schema creation.
+  - `Step 4/4 (100%)`: Chained cryptographic audit logging in PostgreSQL.
+- **1-Click Demo Intelligence Datasets**: Pre-configured sample intelligence files ready for one-click testing:
+  - *Defence Directive 2026 (Air-Gap Standard)*
+  - *SCADA Cyber Incident Advisory*
+  - *Maritime Reconnaissance Patrol Log*
+
+### 2. Output-Type Selector & 6-Parameter Transformation Config
+- **Multi-Format Selection**: Multi-select checkboxes with `Select All (7 Formats)` and `Clear All` shortcuts across all 7 deliverable adapters:
+  1. *LinkedIn Post* (Social)
+  2. *Twitter/X Thread* (Social)
+  3. *Executive Summary* (Executive)
+  4. *Tactical Advisory* (Operational &mdash; Review Mandatory)
+  5. *Presentation Deck* (Slide Hierarchy)
+  6. *Video Package* (Script & Storyboard)
+  7. *Infographic Layout Spec* (Visual Data Layout)
+- **6-Parameter Transformation Panel**:
+  - `Audience`: Target audience persona (e.g. *Air Force & Cyber Command*, *C-Suite*, *Public*).
+  - `Tone`: Stylistic voice (e.g. *Authoritative & Objective*, *Urgent Operational Alert*).
+  - `Language`: ISO code specification (`en`, `es`, `fr`, `de`, `hi`).
+  - `Detail Level`: Output depth (`brief`, `standard`, `comprehensive`).
+  - `Objective`: Operational mission goal (e.g. *Threat Assessment & Operational Readiness*).
+  - `Style`: Professional standard (e.g. *DoD / Military Directive Standard (MIL-STD)*, *ICD 203*).
+- **Quick-Load Presets**: 1-click presets configuring all 6 parameters simultaneously:
+  - `DoD Directive`: Military directive standard for joint chiefs & command.
+  - `Executive Brief`: Condensed C-suite strategic decision briefing.
+  - `Threat Alert`: Urgent tactical alert for CERT & field operators.
+  - `Public Advisory`: AP news wire standard for public release.
+
+### 3. Generation Results View with Inline Citation Highlighting & `/trace`
+- **Tabbed Results View**: Tabbed container switching across generated deliverables with visual status pills (`Draft`, `Review Required`, `Final`).
+- **Inline Citation Highlighting & Interactive Hover**:
+  - Every generated claim sentence is highlighted with an interactive citation pill (`[Chunk #ID]`).
+  - Hovering or clicking any sentence triggers the **Grounding Provenance Panel** calling `/api/v1/grounding/trace/{output_id}/{sentence_index}`.
+  - Displays verbatim ground-truth source quote, character offsets (`char_offset_start/end`), source document heading, and verification badge (`100% Provenance Verified`).
+- **Direct Review Navigation**: Quick button `👉 Open in Review Studio` jumps directly into Human Review for that deliverable.
+
+### 4. Reviewer Studio View (Role-Gated RBAC)
+- Integrated Phase 6 dual-control studio accessible to `reviewer` / `approver` roles:
+  - Inline sentence accept/reject controls and bulk section-level approvals.
+  - Interactive sentence editor with live git-style unified diff computation.
+  - Deliverables start locked in `draft`; export gatekeeper strictly blocks unauthorized dissemination.
+  - Formal reviewer sign-off transitions deliverable to `final`, unlocking multi-format exports (`.md`, `.json`, `.html`, `.txt`).
+
+### 5. Filterable Cryptographic Audit Log Viewer
+- Real-time tabular viewer querying `GET /api/v1/audit/logs`:
+  - **Live Filters**: Filter by Action (`upload`, `generate`, `edit_sentence`, `approve`, `reject`, `export`, `tamper_detected`) and Actor (`operator_alice`, `reviewer_bob`).
+  - **Free-Text Search**: Real-time substring search across IDs, actor names, target references, hashes, and payload details.
+  - **Cryptographic Linkage Inspector**: Expandable drawer revealing `Current Hash`, `Previous Hash`, `Source SHA-256`, and formatted event JSON metadata.
+  - **One-Click Hash Copy**: Copy full 64-character SHA-256 hashes to clipboard.
+  - **Live Audit Re-Verification**: Triggers `/api/v1/audit/verify` to recalculate and validate the entire chain on the fly.
+
+### 6. Persistent "Offline Mode: Active" Banner & Live Air-Gap Isolation Proof Modal
+- **Persistent Header Banner**: High-visibility status indicator with animated pulsing emerald beacon and `Offline Mode: Active (Zero Outbound Egress)`.
+- **Interactive Air-Gap Proof Modal**:
+  - **Live Socket Egress Probe**: Sends a live non-blocking TCP socket connection to `1.1.1.1:53` (public DNS root) via `/health/airgap`. Confirms blocked egress (`Errno 10051 / 10060 - Network Unreachable`).
+  - **Re-Probe Button**: Allows judges to re-trigger the socket test on demand.
+  - **Container Network Topology Diagram**: Documents Docker `internal: true` bridge, disabled default gateway, and local container resolution.
+  - **Dependency Security Audit**: Certifies zero external cloud SDKs in `requirements.txt` and `package.json`, local AES-256-GCM key derivation, and immutable audit logging.
+
+---
+
 ## Phase Roadmap
 - **[x] Phase 0: Repo Scaffolding & Environment** — Running skeleton with all 5 services stubbed, zero egress network, health checks, CI stub.
 - **[x] Phase 1: Ingestion Pipeline** — Multi-modal file router (Docling, PaddleOCR, Whisper), common SourceDocument schema, AES-256 encryption at rest, append-only tamper-evident audit logging, and low-confidence flags.
@@ -584,7 +669,7 @@ conda run -n tri python scripts/verify_phase6_review.py
 - **[x] Phase 4: Output Generation Adapters** — Common adapter interface, 7 modular adapters (LinkedIn, Twitter Thread, Executive Summary, Advisory, Presentation, Video Package, Infographic), dynamic config registration, multi-select concurrent generation, safety-critical human review gatekeeper, and interactive slide/storyboard/metric previews.
 - **[x] Phase 5: Security & Audit Layer** — RBAC dual-control model (`operator` vs `reviewer`/`approver`), append-only SHA-256 cryptographic hash chaining with live tamper detection, AES-256-GCM encryption at rest for generated outputs/exports, socket-level air-gap egress cut proof, and zero-telemetry dependency audit.
 - **[x] Phase 6: Human Review & Approval Workflow** — Default draft status, sentence/section accept & reject decisions, inline editor with git-style unified diffs, immutable `OutputEditHistory` table, formal reviewer approval state transition to `final`, export lock enforcement, and interactive diff modal.
-- **[ ] Phase 7: Operator Dashboard** — Complete interactive React UI with hover-to-source inspection.
+- **[x] Phase 7: Operator Dashboard** — Complete interactive React UI with 1-click sample intelligence docs, 6-parameter config panel, tabbed generation results with inline `/trace` grounding inspector, role-gated Review Studio, filterable cryptographic audit table, and live socket-level air-gap egress proof.
 - **[ ] Phase 8: Testing, Hardening & Deliverables Packaging** — Architecture document, demo script, and final packaging.
 
 

@@ -17,8 +17,8 @@ export const App: React.FC = () => {
                 <h1 className="text-sm sm:text-base font-bold text-white tracking-tight">
                   SIH26155 &mdash; GenAI Content Transformation Platform
                 </h1>
-                <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-indigo-950 text-indigo-400 border border-indigo-800/50">
-                  Phase 0 Skeleton
+                <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-700/60 font-semibold">
+                  Phase 7: Operator Dashboard Active
                 </span>
               </div>
               <p className="text-[11px] text-gray-400 hidden sm:block">
@@ -52,7 +52,7 @@ export const App: React.FC = () => {
       <footer className="border-t border-gray-900 bg-gray-950 py-4 text-center text-xs text-gray-500 font-mono">
         <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
           <div>SIH26155 GenAI Automated Content Transformation &bull; Zero External Network Calls</div>
-          <div className="text-gray-400">Phase 0: Environment & Scaffolding Verified</div>
+          <div className="text-gray-400">Phase 7: Operator Dashboard (End-to-End Enclave Active)</div>
         </div>
       </footer>
     </div>
