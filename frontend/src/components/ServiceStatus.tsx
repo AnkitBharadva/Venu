@@ -32,13 +32,13 @@ export const ServiceStatus: React.FC = () => {
     try {
       const res = await fetch('/health');
       if (!res.ok) {
-        throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+        throw new Error(`HTTP ${res.status}`);
       }
       const data: HealthResponse = await res.json();
       setHealth(data);
-      setLastChecked(new Date().toLocaleTimeString());
+      setLastChecked(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to connect to backend service');
+      setError(err instanceof Error ? err.message : 'Offline');
     } finally {
       setLoading(false);
     }
@@ -50,128 +50,83 @@ export const ServiceStatus: React.FC = () => {
     return () => clearInterval(interval);
   }, [fetchHealth]);
 
-  const getStatusBadge = (statusName?: string) => {
-    if (statusName === 'healthy' || statusName === 'ok') {
-      return (
-        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-950 text-emerald-400 border border-emerald-800/60">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1.5 animate-pulse"></span>
-          Operational
-        </span>
-      );
-    }
-    if (statusName === 'degraded') {
-      return (
-        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-950 text-amber-400 border border-amber-800/60">
-          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 mr-1.5"></span>
-          Degraded
-        </span>
-      );
-    }
-    return (
-      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-rose-950 text-rose-400 border border-rose-800/60">
-        <span className="w-1.5 h-1.5 rounded-full bg-rose-400 mr-1.5"></span>
-        Unreachable
-      </span>
-    );
-  };
+  const isAllHealthy =
+    health?.status === 'healthy' &&
+    health?.dependencies?.postgres?.status === 'healthy' &&
+    health?.dependencies?.qdrant?.status === 'healthy' &&
+    health?.dependencies?.falkordb?.status === 'healthy';
 
   return (
-    <div className="bg-gray-900/80 backdrop-blur border border-gray-800 rounded-xl p-5 shadow-lg">
-      <div className="flex items-center justify-between pb-4 mb-4 border-b border-gray-800">
-        <div className="flex items-center space-x-3">
-          <div className="w-3 h-3 rounded-full bg-indigo-500 shadow-sm shadow-indigo-500/50"></div>
-          <h2 className="text-base font-semibold text-white tracking-wide">
-            Enclave Infrastructure Health
-          </h2>
-          <span className="text-xs px-2 py-0.5 rounded bg-gray-800 text-gray-400 font-mono">
-            Zero Egress Guarded
+    <div className="bg-[#F8F7F3] border border-[#D8D5CE] rounded-lg px-3.5 py-2 flex flex-wrap items-center justify-between gap-3 text-xs font-mono shadow-soft">
+      <div className="flex items-center space-x-3 overflow-x-auto py-0.5">
+        {/* Master Status */}
+        <div className="flex items-center space-x-2 shrink-0">
+          <span className={`w-1.5 h-1.5 rounded-full ${isAllHealthy ? 'bg-[#7E9D82]' : error ? 'bg-[#C87970]' : 'bg-[#EBCB72]'}`}></span>
+          <span className="font-medium text-[#252525]">
+            {error ? 'Service Alert' : isAllHealthy ? 'Workstation Core Active' : 'Connecting...'}
           </span>
         </div>
 
-        <div className="flex items-center space-x-3">
-          {lastChecked && (
-            <span className="text-xs text-gray-500 font-mono">Checked: {lastChecked}</span>
+        <span className="text-[#D8D5CE]">|</span>
+
+        {/* FastAPI Backend */}
+        <div className="flex items-center space-x-1.5 text-[#6F6D68] shrink-0">
+          <span className="text-[11px] text-[#99958D]">API:</span>
+          <span className="text-[#30302E]">8000</span>
+          <span className="text-[#7E9D82] text-[9px]">●</span>
+        </div>
+
+        <span className="text-[#D8D5CE]">·</span>
+
+        {/* PostgreSQL */}
+        <div className="flex items-center space-x-1.5 text-[#6F6D68] shrink-0">
+          <span className="text-[11px] text-[#99958D]">SQL:</span>
+          <span className="text-[#30302E]">5432</span>
+          {health?.dependencies?.postgres?.latency_ms !== undefined && (
+            <span className="text-[#99958D] text-[10px]">({Math.round(health.dependencies.postgres.latency_ms)}ms)</span>
           )}
-          <button
-            onClick={fetchHealth}
-            disabled={loading}
-            className="text-xs px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-200 rounded-lg border border-gray-700 transition font-medium flex items-center space-x-1.5 disabled:opacity-50"
-          >
-            <span>{loading ? 'Probing...' : 'Refresh Status'}</span>
-          </button>
+          <span className={health?.dependencies?.postgres?.status === 'healthy' ? 'text-[#7E9D82] text-[9px]' : 'text-[#EBCB72] text-[9px]'}>●</span>
+        </div>
+
+        <span className="text-[#D8D5CE]">·</span>
+
+        {/* Qdrant */}
+        <div className="flex items-center space-x-1.5 text-[#6F6D68] shrink-0">
+          <span className="text-[11px] text-[#99958D]">Vector:</span>
+          <span className="text-[#30302E]">6333</span>
+          {health?.dependencies?.qdrant?.latency_ms !== undefined && (
+            <span className="text-[#99958D] text-[10px]">({Math.round(health.dependencies.qdrant.latency_ms)}ms)</span>
+          )}
+          <span className={health?.dependencies?.qdrant?.status === 'healthy' ? 'text-[#7E9D82] text-[9px]' : 'text-[#EBCB72] text-[9px]'}>●</span>
+        </div>
+
+        <span className="text-[#D8D5CE]">·</span>
+
+        {/* FalkorDB */}
+        <div className="flex items-center space-x-1.5 text-[#6F6D68] shrink-0">
+          <span className="text-[11px] text-[#99958D]">Graph:</span>
+          <span className="text-[#30302E]">6379</span>
+          {health?.dependencies?.falkordb?.latency_ms !== undefined && (
+            <span className="text-[#99958D] text-[10px]">({Math.round(health.dependencies.falkordb.latency_ms)}ms)</span>
+          )}
+          <span className={health?.dependencies?.falkordb?.status === 'healthy' ? 'text-[#7E9D82] text-[9px]' : 'text-[#EBCB72] text-[9px]'}>●</span>
         </div>
       </div>
 
-      {error ? (
-        <div className="p-4 rounded-lg bg-rose-950/40 border border-rose-800/50 text-rose-300 text-sm flex items-start space-x-3">
-          <span className="text-rose-400 text-base">⚠️</span>
-          <div>
-            <p className="font-medium">Backend Connection Error</p>
-            <p className="text-xs text-rose-400/80 mt-0.5">{error}</p>
-            <p className="text-xs text-gray-400 mt-2">
-              Ensure the backend service is running on port 8000 via Docker Compose or locally via{' '}
-              <code className="bg-black/30 px-1 py-0.5 rounded text-amber-300">conda activate tri</code>.
-            </p>
-          </div>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {/* Backend Service */}
-          <div className="bg-gray-950/60 p-4 rounded-lg border border-gray-800/80">
-            <div className="flex justify-between items-start mb-2">
-              <span className="text-xs font-medium text-gray-400 uppercase tracking-wider">FastAPI Backend</span>
-              {getStatusBadge(health?.status)}
-            </div>
-            <div className="text-sm font-semibold text-gray-100 mt-1">Core Orchestrator</div>
-            <div className="text-xs text-gray-500 font-mono mt-1">Port 8000 &bull; REST API</div>
-          </div>
-
-          {/* PostgreSQL */}
-          <div className="bg-gray-950/60 p-4 rounded-lg border border-gray-800/80">
-            <div className="flex justify-between items-start mb-2">
-              <span className="text-xs font-medium text-gray-400 uppercase tracking-wider">PostgreSQL</span>
-              {getStatusBadge(health?.dependencies?.postgres?.status)}
-            </div>
-            <div className="text-sm font-semibold text-gray-100 mt-1">Metadata & Audit Log</div>
-            <div className="text-xs text-gray-500 font-mono mt-1 flex justify-between">
-              <span>Port 5432 &bull; AsyncPG</span>
-              {health?.dependencies?.postgres?.latency_ms !== undefined && (
-                <span className="text-emerald-400 font-medium">{health.dependencies.postgres.latency_ms}ms</span>
-              )}
-            </div>
-          </div>
-
-          {/* Qdrant */}
-          <div className="bg-gray-950/60 p-4 rounded-lg border border-gray-800/80">
-            <div className="flex justify-between items-start mb-2">
-              <span className="text-xs font-medium text-gray-400 uppercase tracking-wider">Qdrant Store</span>
-              {getStatusBadge(health?.dependencies?.qdrant?.status)}
-            </div>
-            <div className="text-sm font-semibold text-gray-100 mt-1">Vector Grounding</div>
-            <div className="text-xs text-gray-500 font-mono mt-1 flex justify-between">
-              <span>Port 6333 &bull; REST/gRPC</span>
-              {health?.dependencies?.qdrant?.latency_ms !== undefined && (
-                <span className="text-emerald-400 font-medium">{health.dependencies.qdrant.latency_ms}ms</span>
-              )}
-            </div>
-          </div>
-
-          {/* FalkorDB */}
-          <div className="bg-gray-950/60 p-4 rounded-lg border border-gray-800/80">
-            <div className="flex justify-between items-start mb-2">
-              <span className="text-xs font-medium text-gray-400 uppercase tracking-wider">FalkorDB</span>
-              {getStatusBadge(health?.dependencies?.falkordb?.status)}
-            </div>
-            <div className="text-sm font-semibold text-gray-100 mt-1">Graph Entity Store</div>
-            <div className="text-xs text-gray-500 font-mono mt-1 flex justify-between">
-              <span>Port 6379 &bull; Cypher Graph</span>
-              {health?.dependencies?.falkordb?.latency_ms !== undefined && (
-                <span className="text-emerald-400 font-medium">{health.dependencies.falkordb.latency_ms}ms</span>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Timestamp & Refresh */}
+      <div className="flex items-center space-x-2 text-[11px] text-[#99958D] ml-auto shrink-0">
+        {lastChecked && <span>Synced {lastChecked}</span>}
+        <button
+          onClick={fetchHealth}
+          disabled={loading}
+          className="p-1 hover:text-[#252525] text-[#6F6D68] transition disabled:opacity-50"
+          title="Refresh telemetry"
+        >
+          <svg className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+        </button>
+      </div>
     </div>
   );
 };
