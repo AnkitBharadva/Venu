@@ -93,7 +93,7 @@ interface SearchResultItem {
   heading?: string;
 }
 
-// Phase 3 Schemas
+// Phase 3 & 4 Schemas
 interface GroundingSourceSpan {
   chunk_id: string;
   chunk_index: number;
@@ -157,6 +157,7 @@ interface DeliverableResponse {
     quote: string;
     heading?: string;
   }>;
+  format_metadata: Record<string, any>;
   total_sentences: number;
   total_citations: number;
   contract_verified: boolean;
@@ -184,9 +185,19 @@ interface GroundedContextResponse {
   merged_context_text: string;
 }
 
+const AVAILABLE_FORMATS = [
+  { id: 'linkedin_post', label: 'LinkedIn Post', icon: '💼', category: 'Social' },
+  { id: 'twitter_thread', label: 'Twitter/X Thread', icon: '🐦', category: 'Social' },
+  { id: 'executive_summary', label: 'Executive Summary', icon: '📋', category: 'Executive' },
+  { id: 'advisory', label: 'Tactical Advisory', icon: '🛡️', category: 'Operational', reviewRequired: true },
+  { id: 'presentation', label: 'Presentation Deck', icon: '📊', category: 'Presentation' },
+  { id: 'video_package', label: 'Video Package (Script & Storyboard)', icon: '🎬', category: 'Multimedia' },
+  { id: 'infographic', label: 'Infographic Layout Spec', icon: '📐', category: 'Visual' },
+];
+
 export const BlankDashboard: React.FC = () => {
   // Navigation tabs
-  const [activeTab, setActiveTab] = useState<'pipeline' | 'grounding'>('pipeline');
+  const [activeTab, setActiveTab] = useState<'pipeline' | 'adapters'>('adapters');
 
   // Ingestion State (Phase 1)
   const [isUploading, setIsUploading] = useState<boolean>(false);
@@ -208,19 +219,36 @@ export const BlankDashboard: React.FC = () => {
   const [isSearching, setIsSearching] = useState<boolean>(false);
   const [searchResults, setSearchResults] = useState<SearchResultItem[] | null>(null);
 
-  // Grounding & Provenance Trace State (Phase 3)
+  // Phase 4 Multi-Select Adapters State
+  const [selectedFormats, setSelectedFormats] = useState<string[]>([
+    'linkedin_post',
+    'twitter_thread',
+    'executive_summary',
+    'advisory',
+  ]);
+  const [targetAudience, setTargetAudience] = useState<string>('Air Force & Cyber Command');
+  const [targetTone, setTargetTone] = useState<string>('Authoritative & Objective');
+  const [detailLevel, setDetailLevel] = useState<string>('comprehensive');
+  const [isGeneratingMulti, setIsGeneratingMulti] = useState<boolean>(false);
+
+  // Grounding & Provenance Trace State (Phase 3 & 4)
   const [deliverables, setDeliverables] = useState<DeliverableResponse[]>([]);
   const [selectedDeliverable, setSelectedDeliverable] = useState<DeliverableResponse | null>(null);
   const [hoveredSentenceId, setHoveredSentenceId] = useState<string | null>(null);
   const [sentenceTrace, setSentenceTrace] = useState<SentenceTraceResponse | null>(null);
   const [isTracing, setIsTracing] = useState<boolean>(false);
-  const [isGeneratingDeliverables, setIsGeneratingDeliverables] = useState<boolean>(false);
   const [gatekeeperAlert, setGatekeeperAlert] = useState<{ type: 'error' | 'success'; message: string } | null>(null);
 
   // Hybrid Retrieval State
-  const [hybridQuery, setHybridQuery] = useState<string>('air-gapped security architecture');
+  const [hybridQuery, setHybridQuery] = useState<string>('air-gapped security and cryptographic isolation');
   const [isRetrievingHybrid, setIsRetrievingHybrid] = useState<boolean>(false);
   const [hybridResult, setHybridResult] = useState<GroundedContextResponse | null>(null);
+
+  const toggleFormat = (id: string) => {
+    setSelectedFormats((prev) =>
+      prev.includes(id) ? prev.filter((f) => f !== id) : [...prev, id]
+    );
+  };
 
   const handleFileUpload = async (file: File) => {
     setIsUploading(true);
@@ -366,109 +394,44 @@ export const BlankDashboard: React.FC = () => {
     }
   };
 
-  const handleGenerateSampleDeliverables = async () => {
-    if (!latestDoc || chunks.length === 0) return;
+  const handleMultiGenerate = async () => {
+    if (!latestDoc || chunks.length === 0 || selectedFormats.length === 0) return;
 
-    setIsGeneratingDeliverables(true);
+    setIsGeneratingMulti(true);
     setGatekeeperAlert(null);
 
     try {
-      const c0 = chunks[0];
-      const c1 = chunks[1] || chunks[0];
-      const c2 = chunks[2] || chunks[0];
-
-      // 1. Executive Summary (4 sentences)
-      const execPayload = {
+      const payload = {
         doc_id: latestDoc.doc_id,
-        deliverable_type: 'executive_summary',
-        content: {
-          title: `Executive Intelligence Summary: ${latestDoc.original_filename}`,
-          summary: 'High-level decision briefing with 100% verbatim source grounding.',
-          blocks: [
-            {
-              block_index: 0,
-              title: 'Strategic Mandate & Threat Scope',
-              sentences: [
-                {
-                  sentence_id: 'exec_sent_0',
-                  sentence_index: 0,
-                  text: c0.text.slice(0, 140) + '...',
-                  citations: [
-                    {
-                      chunk_id: c0.chunk_id,
-                      char_offset_start: c0.char_offset_start,
-                      char_offset_end: c0.char_offset_end,
-                      quote: c0.text,
-                    },
-                  ],
-                },
-                {
-                  sentence_id: 'exec_sent_1',
-                  sentence_index: 1,
-                  text: 'Hardware-level cryptographic validation ensures strict data immutability across all processing nodes.',
-                  citations: [
-                    {
-                      chunk_id: c0.chunk_id,
-                      char_offset_start: c0.char_offset_start,
-                      char_offset_end: c0.char_offset_end,
-                      quote: c0.text,
-                    },
-                  ],
-                },
-              ],
-            },
-            {
-              block_index: 1,
-              title: 'Operational Vectors & Assets',
-              sentences: [
-                {
-                  sentence_id: 'exec_sent_2',
-                  sentence_index: 2,
-                  text: c1.text.slice(0, 140) + '...',
-                  citations: [
-                    {
-                      chunk_id: c1.chunk_id,
-                      char_offset_start: c1.char_offset_start,
-                      char_offset_end: c1.char_offset_end,
-                      quote: c1.text,
-                    },
-                  ],
-                },
-                {
-                  sentence_id: 'exec_sent_3',
-                  sentence_index: 3,
-                  text: c2.text.slice(0, 140) + '...',
-                  citations: [
-                    {
-                      chunk_id: c2.chunk_id,
-                      char_offset_start: c2.char_offset_start,
-                      char_offset_end: c2.char_offset_end,
-                      quote: c2.text,
-                    },
-                  ],
-                },
-              ],
-            },
-          ],
+        deliverable_types: selectedFormats,
+        query: hybridQuery || undefined,
+        parameters: {
+          audience: targetAudience,
+          tone: targetTone,
+          detail_level: detailLevel,
         },
-        format_metadata: { format: 'executive_briefing', clearance: 'RESTRICTED' },
+        actor: 'operator_primary',
       };
 
-      const res = await fetch('/api/v1/grounding/outputs', {
+      const res = await fetch('/api/v1/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(execPayload),
+        body: JSON.stringify(payload),
       });
 
       if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.detail?.message || 'Failed to create deliverable');
+        const errJson = await res.json().catch(() => null);
+        throw new Error(errJson?.detail?.message || errJson?.detail || 'Multi-deliverable generation failed');
       }
 
-      await loadDeliverables(latestDoc.doc_id);
+      const data = await res.json();
+      setDeliverables(data.deliverables);
+      if (data.deliverables.length > 0) {
+        setSelectedDeliverable(data.deliverables[0]);
+      }
       setGatekeeperAlert({
         type: 'success',
-        message: 'Successfully generated grounded deliverable! Hard claim-citation contract verified 100%.',
+        message: `Successfully generated ${data.total_deliverables} grounded deliverables! 100% claim-to-chunk provenance contract enforced.`,
       });
     } catch (err: unknown) {
       setGatekeeperAlert({
@@ -476,7 +439,7 @@ export const BlankDashboard: React.FC = () => {
         message: err instanceof Error ? err.message : 'Generation failed',
       });
     } finally {
-      setIsGeneratingDeliverables(false);
+      setIsGeneratingMulti(false);
     }
   };
 
@@ -593,12 +556,12 @@ export const BlankDashboard: React.FC = () => {
               <h3 className="text-sm font-bold text-white uppercase tracking-wider">
                 Air-Gap Enclave: Active (Zero Outbound Egress)
               </h3>
-              <span className="bg-emerald-500/20 text-emerald-300 text-[10px] font-mono px-2 py-0.5 rounded border border-emerald-500/30">
-                Phase 3 Verified
+              <span className="bg-indigo-500/20 text-indigo-300 text-[10px] font-mono px-2 py-0.5 rounded border border-indigo-500/30">
+                Phase 4 Generation Adapters Active
               </span>
             </div>
             <p className="text-xs text-gray-400 mt-0.5">
-              Strict Claim-Citation Contract &bull; Hybrid Vector-Graph Retrieval &bull; Exact Hovercard Provenance Trace.
+              Modular Output Adapters &bull; Multi-Select Batch Execution &bull; Strict Claim-Citation Contract &bull; Safety-Critical Advisory Gatekeeper.
             </p>
           </div>
         </div>
@@ -616,14 +579,14 @@ export const BlankDashboard: React.FC = () => {
             Ingestion & Understanding (Phases 1-2)
           </button>
           <button
-            onClick={() => setActiveTab('grounding')}
+            onClick={() => setActiveTab('adapters')}
             className={`px-3 py-1.5 rounded-md text-xs font-medium transition flex items-center space-x-1.5 ${
-              activeTab === 'grounding'
+              activeTab === 'adapters'
                 ? 'bg-emerald-600 text-white shadow-sm'
                 : 'text-gray-400 hover:text-gray-200'
             }`}
           >
-            <span>🎯 Grounding & Trace (Phase 3)</span>
+            <span>🎯 Output Adapters & Trace (Phases 3-4)</span>
             {deliverables.length > 0 && (
               <span className="bg-emerald-950 text-emerald-300 text-[10px] font-mono px-1.5 py-0.2 rounded-full border border-emerald-800">
                 {deliverables.length}
@@ -947,34 +910,40 @@ export const BlankDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* TAB 2: Phase 3 Grounding & Provenance Trace Inspector */}
-      {activeTab === 'grounding' && (
+      {/* TAB 2: Phase 4 Multi-Select Output Adapters & Grounding Suite */}
+      {activeTab === 'adapters' && (
         <div className="space-y-6">
-          {/* Top Control Bar: Contract Gatekeeper and Deliverable Generator */}
+          {/* Multi-Select Adapter Generator Console */}
           <div className="bg-gray-900/60 border border-gray-800/80 rounded-xl p-5">
-            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between pb-4 border-b border-gray-800 mb-4 gap-4">
               <div>
                 <h3 className="text-sm font-bold text-gray-200 flex items-center space-x-2">
                   <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
-                  <span>Hard Claim-Citation Contract & Deliverable Generator</span>
+                  <span>Modular Output Generation Adapters (Phase 4)</span>
                 </h3>
                 <p className="text-xs text-gray-400 mt-1">
-                  Generation adapters cannot emit claims without explicit chunk citations. All claims are strictly validated at the gateway.
+                  Select multiple target deliverable formats. Adapters execute concurrently against shared grounded context.
                 </p>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2.5">
+              <div className="flex items-center gap-2">
                 <button
-                  onClick={handleGenerateSampleDeliverables}
-                  disabled={isGeneratingDeliverables || chunks.length === 0}
-                  className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-800 text-white text-xs rounded-lg font-medium transition flex items-center space-x-2 shadow-sm"
+                  onClick={handleMultiGenerate}
+                  disabled={isGeneratingMulti || chunks.length === 0 || selectedFormats.length === 0}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-800 text-white text-xs rounded-lg font-semibold transition flex items-center space-x-2 shadow-sm"
                 >
-                  {isGeneratingDeliverables ? (
-                    <span>Generating Grounded Deliverables...</span>
+                  {isGeneratingMulti ? (
+                    <>
+                      <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                      </svg>
+                      <span>Generating ({selectedFormats.length}) Deliverables...</span>
+                    </>
                   ) : (
                     <>
                       <span>✨</span>
-                      <span>Generate Grounded Deliverables</span>
+                      <span>Generate Selected ({selectedFormats.length}) Formats</span>
                     </>
                   )}
                 </button>
@@ -983,10 +952,89 @@ export const BlankDashboard: React.FC = () => {
                   onClick={handleTestHardContractViolation}
                   disabled={!latestDoc}
                   className="px-3.5 py-2 bg-rose-950/60 hover:bg-rose-900/80 border border-rose-800/80 text-rose-300 text-xs rounded-lg font-medium transition flex items-center space-x-1.5"
+                  title="Demonstrate that uncited claims are blocked by the gateway"
                 >
                   <span>🛡️</span>
-                  <span>Test Gatekeeper (Uncited Rejection)</span>
+                  <span>Gatekeeper Test</span>
                 </button>
+              </div>
+            </div>
+
+            {/* Format Multi-Select Checkbox Pills */}
+            <div className="space-y-3">
+              <span className="text-[10px] font-mono uppercase tracking-wider text-gray-400 block">
+                Select Deliverable Formats:
+              </span>
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5">
+                {AVAILABLE_FORMATS.map((fmt) => {
+                  const isSelected = selectedFormats.includes(fmt.id);
+                  return (
+                    <div
+                      key={fmt.id}
+                      onClick={() => toggleFormat(fmt.id)}
+                      className={`p-2.5 rounded-lg border text-xs cursor-pointer transition flex items-center justify-between ${
+                        isSelected
+                          ? 'bg-emerald-950/70 border-emerald-500/80 text-emerald-100 shadow-sm'
+                          : 'bg-gray-950/60 border-gray-800 text-gray-400 hover:border-gray-700'
+                      }`}
+                    >
+                      <div className="flex items-center space-x-2">
+                        <span className="text-base">{fmt.icon}</span>
+                        <div>
+                          <span className="font-medium text-xs block text-gray-200">{fmt.label}</span>
+                          <span className="text-[9px] font-mono text-gray-400">{fmt.category}</span>
+                        </div>
+                      </div>
+                      <div className="flex items-center space-x-1.5">
+                        {fmt.reviewRequired && (
+                          <span className="text-[9px] px-1 py-0.2 rounded bg-amber-950/80 text-amber-400 border border-amber-800/50">
+                            Review Lock
+                          </span>
+                        )}
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => {}} // handled by parent div
+                          className="rounded text-emerald-600 focus:ring-0 border-gray-700 bg-gray-900"
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Generation Parameters Configuration */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-3 border-t border-gray-800/80">
+                <div>
+                  <label className="text-[10px] font-mono text-gray-400 block mb-1">Target Audience</label>
+                  <input
+                    type="text"
+                    value={targetAudience}
+                    onChange={(e) => setTargetAudience(e.target.value)}
+                    className="w-full bg-gray-950 border border-gray-800 rounded px-2.5 py-1 text-xs text-gray-200 focus:border-indigo-500 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-mono text-gray-400 block mb-1">Tone of Voice</label>
+                  <input
+                    type="text"
+                    value={targetTone}
+                    onChange={(e) => setTargetTone(e.target.value)}
+                    className="w-full bg-gray-950 border border-gray-800 rounded px-2.5 py-1 text-xs text-gray-200 focus:border-indigo-500 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-mono text-gray-400 block mb-1">Detail Level</label>
+                  <select
+                    value={detailLevel}
+                    onChange={(e) => setDetailLevel(e.target.value)}
+                    className="w-full bg-gray-950 border border-gray-800 rounded px-2.5 py-1 text-xs text-gray-200 focus:border-indigo-500 focus:outline-none"
+                  >
+                    <option value="brief">Brief</option>
+                    <option value="standard">Standard</option>
+                    <option value="comprehensive">Comprehensive</option>
+                  </select>
+                </div>
               </div>
             </div>
 
@@ -1003,14 +1051,14 @@ export const BlankDashboard: React.FC = () => {
             )}
           </div>
 
-          {/* Main Phase 3 Layout: 2 Columns */}
+          {/* Deliverables Viewer + Interactive Hovercard Inspector */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-            {/* Left Column: Deliverable Viewer & Sentence Provenance */}
+            {/* Left Column: Deliverable Viewer with Hovercards */}
             <div className="lg:col-span-7 bg-gray-900/60 border border-gray-800/80 rounded-xl p-5 flex flex-col justify-between">
               <div>
                 <div className="flex items-center justify-between pb-3 border-b border-gray-800 mb-4">
                   <div className="flex items-center space-x-2">
-                    <span className="text-sm font-semibold text-gray-200">Grounded Deliverables</span>
+                    <span className="text-sm font-semibold text-gray-200">Generated Deliverables</span>
                     {selectedDeliverable && (
                       <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded bg-emerald-950/60 border border-emerald-800/60 text-emerald-300">
                         {selectedDeliverable.deliverable_type}
@@ -1018,7 +1066,7 @@ export const BlankDashboard: React.FC = () => {
                     )}
                   </div>
                   <span className="text-[10px] font-mono text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/40">
-                    Hover a Sentence &bull; Trace Prov
+                    Hover Sentence &bull; Trace Provenance
                   </span>
                 </div>
 
@@ -1033,13 +1081,17 @@ export const BlankDashboard: React.FC = () => {
                             setSelectedDeliverable(d);
                             setSentenceTrace(null);
                           }}
-                          className={`px-3 py-1.5 rounded-lg text-xs font-mono transition border ${
+                          className={`px-3 py-1.5 rounded-lg text-xs font-mono transition border flex items-center space-x-1.5 ${
                             selectedDeliverable?.output_id === d.output_id
                               ? 'bg-emerald-950/80 border-emerald-500 text-emerald-200'
                               : 'bg-gray-950 border-gray-800 text-gray-400 hover:border-gray-700'
                           }`}
                         >
-                          {d.deliverable_type} ({d.total_sentences} sentences)
+                          <span>{d.deliverable_type}</span>
+                          {d.format_metadata?.requires_human_review && (
+                            <span className="w-1.5 h-1.5 rounded-full bg-rose-400" title="Review Required"></span>
+                          )}
+                          <span className="text-[10px] opacity-70">({d.total_sentences})</span>
                         </button>
                       ))}
                     </div>
@@ -1047,18 +1099,76 @@ export const BlankDashboard: React.FC = () => {
                     {/* Content Display with Sentence Hovercards */}
                     {selectedDeliverable && (
                       <div className="p-4 rounded-xl bg-gray-950/90 border border-gray-800 space-y-4">
-                        <div className="border-b border-gray-800/80 pb-3">
-                          <h4 className="text-sm font-bold text-gray-100">
-                            {selectedDeliverable.content.title}
-                          </h4>
-                          {selectedDeliverable.content.summary && (
-                            <p className="text-xs text-gray-400 mt-1 italic">
-                              {selectedDeliverable.content.summary}
-                            </p>
+                        <div className="border-b border-gray-800/80 pb-3 flex flex-col md:flex-row md:items-center justify-between gap-2">
+                          <div>
+                            <h4 className="text-sm font-bold text-gray-100">
+                              {selectedDeliverable.content.title}
+                            </h4>
+                            {selectedDeliverable.content.summary && (
+                              <p className="text-xs text-gray-400 mt-1 italic">
+                                {selectedDeliverable.content.summary}
+                              </p>
+                            )}
+                          </div>
+
+                          {/* Safety Critical Gatekeeper Badge */}
+                          {selectedDeliverable.format_metadata?.requires_human_review && (
+                            <div className="px-2.5 py-1 rounded bg-rose-950/70 border border-rose-800/80 text-rose-300 text-[10px] font-mono flex items-center space-x-1.5">
+                              <span className="animate-pulse">🔒</span>
+                              <span>MANDATORY REVIEW BEFORE EXPORT</span>
+                            </div>
                           )}
                         </div>
 
-                        {/* Blocks */}
+                        {/* Format-Specific Previews */}
+                        {/* 1. LinkedIn Post Hashtags Preview */}
+                        {selectedDeliverable.deliverable_type === 'linkedin_post' && selectedDeliverable.format_metadata?.hashtags && (
+                          <div className="flex flex-wrap gap-1.5 pb-2 border-b border-gray-800/60">
+                            {selectedDeliverable.format_metadata.hashtags.map((h: string, idx: number) => (
+                              <span key={idx} className="text-[10px] font-mono bg-blue-950/50 text-blue-300 border border-blue-800/50 px-2 py-0.5 rounded">
+                                {h}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* 2. Twitter Thread Tweet Cards */}
+                        {selectedDeliverable.deliverable_type === 'twitter_thread' && (
+                          <div className="text-[10px] font-mono text-cyan-400 bg-cyan-950/30 px-2.5 py-1 rounded border border-cyan-800/30 flex items-center justify-between">
+                            <span>Thread Length: {selectedDeliverable.content.blocks.length} Tweets</span>
+                            <span>Max Limit: 280 chars / tweet</span>
+                          </div>
+                        )}
+
+                        {/* 3. Slide Deck Slide Info */}
+                        {selectedDeliverable.deliverable_type === 'presentation' && (
+                          <div className="text-[10px] font-mono text-purple-400 bg-purple-950/30 px-2.5 py-1 rounded border border-purple-800/30 flex items-center justify-between">
+                            <span>Slide Deck: {selectedDeliverable.content.blocks.length} Slides</span>
+                            <span>16:9 Aspect Ratio</span>
+                          </div>
+                        )}
+
+                        {/* 4. Video Package Storyboard Info */}
+                        {selectedDeliverable.deliverable_type === 'video_package' && (
+                          <div className="text-[10px] font-mono text-amber-400 bg-amber-950/30 px-2.5 py-1 rounded border border-amber-800/30 flex items-center justify-between">
+                            <span>Multimedia Storyboard: {selectedDeliverable.content.blocks.length} Scenes</span>
+                            <span>Timecoded SRT Included</span>
+                          </div>
+                        )}
+
+                        {/* 5. Infographic Metrics Summary */}
+                        {selectedDeliverable.deliverable_type === 'infographic' && selectedDeliverable.format_metadata?.key_metrics && (
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pb-2 border-b border-gray-800/60">
+                            {selectedDeliverable.format_metadata.key_metrics.map((m: any, idx: number) => (
+                              <div key={idx} className="p-2 rounded bg-gray-900 border border-gray-800 text-center">
+                                <span className="text-xs font-bold text-emerald-400 block">{m.value}</span>
+                                <span className="text-[9px] text-gray-400 font-mono truncate block">{m.label}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Sentences Container with Interactive Hover & Click */}
                         <div className="space-y-4">
                           {selectedDeliverable.content.blocks.map((block) => (
                             <div key={block.block_index} className="space-y-2">
@@ -1101,6 +1211,18 @@ export const BlankDashboard: React.FC = () => {
                             </div>
                           ))}
                         </div>
+
+                        {/* Expandable SRT Subtitles for Video Package */}
+                        {selectedDeliverable.deliverable_type === 'video_package' && selectedDeliverable.format_metadata?.subtitles_srt && (
+                          <div className="pt-3 border-t border-gray-800">
+                            <span className="text-[10px] font-mono text-amber-400 uppercase tracking-wider block mb-1.5">
+                              Generated Timecoded Subtitles (.SRT Format):
+                            </span>
+                            <pre className="p-2.5 bg-gray-900 border border-gray-800 rounded text-[9px] font-mono text-gray-300 max-h-32 overflow-y-auto whitespace-pre-wrap">
+                              {selectedDeliverable.format_metadata.subtitles_srt}
+                            </pre>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -1108,7 +1230,7 @@ export const BlankDashboard: React.FC = () => {
                   <div className="p-8 text-center text-gray-500 border border-dashed border-gray-800/80 rounded-lg bg-gray-950/30">
                     <p className="text-xs">No deliverables generated yet.</p>
                     <p className="text-[10px] mt-1 text-gray-600">
-                      Click &ldquo;Generate Grounded Deliverables&rdquo; above to synthesize executive summaries, advisories, and posts.
+                      Select target formats above and click &ldquo;Generate Selected Formats&rdquo; to execute Phase 4 adapters.
                     </p>
                   </div>
                 )}
@@ -1116,7 +1238,7 @@ export const BlankDashboard: React.FC = () => {
 
               <div className="mt-4 text-[10px] text-gray-500 border-t border-gray-800/60 pt-2 flex items-center justify-between font-mono">
                 <span>Hard Contract Status: Active</span>
-                <span className="text-emerald-400">100% Citations Enforced</span>
+                <span className="text-emerald-400">100% Citations Enforced Across Formats</span>
               </div>
             </div>
 
@@ -1204,7 +1326,7 @@ export const BlankDashboard: React.FC = () => {
                 )}
               </div>
 
-              {/* Hybrid Grounding Retrieval (/retrieve) */}
+              {/* Hybrid Grounding Retrieval Console */}
               <div className="bg-gray-900/60 border border-gray-800/80 rounded-xl p-5">
                 <div className="flex items-center justify-between pb-3 border-b border-gray-800 mb-4">
                   <h3 className="text-sm font-semibold text-gray-200 flex items-center space-x-2">

@@ -367,12 +367,81 @@ conda run -n tri python scripts/verify_phase3.py
 
 ---
 
+## Phase 4 — Output Generation Adapters API Reference
+
+### 1. Multi-Select Deliverable Generation (`/generate`)
+```bash
+curl -X POST http://localhost:8000/api/v1/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "doc_id": "<DOC_ID>",
+    "deliverable_types": [
+      "linkedin_post",
+      "twitter_thread",
+      "executive_summary",
+      "advisory",
+      "presentation",
+      "video_package",
+      "infographic"
+    ],
+    "query": "air-gapped defense architecture",
+    "parameters": {
+      "audience": "Air Force & Cyber Command",
+      "tone": "authoritative",
+      "detail_level": "comprehensive"
+    }
+  }'
+```
+Retrieves grounded context **once** via hybrid Qdrant + FalkorDB search, then executes all requested adapters concurrently. Every generated sentence is linked to verified source chunks and stored in `generated_outputs` with cryptographic audit logging.
+
+### 2. Built-in Generation Adapters (7 Formats)
+| Deliverable Type | Name | Category | Specifics & Key Features |
+|---|---|---|---|
+| `linkedin_post` | **LinkedIn Post** | Social | Hook + Body + CTA structure with hashtag suggestions. |
+| `twitter_thread` | **Twitter / X Thread** | Social | Sequential numbered tweets (`1/N`, `2/N`), strict 280-char cap. |
+| `executive_summary` | **Executive Summary** | Executive | 150–300 word leadership briefing with Findings & Implications. |
+| `advisory` | **Tactical Advisory** | Operational | **Safety-Critical:** Summary, Details, Risk, Actions. **Mandatory Human Review Lock** (`requires_human_review: true`, `export_locked: true`). |
+| `presentation` | **Presentation Deck** | Presentation | Structured slide deck JSON (titles, bullets, speaker notes) for interactive slide preview (non-binary). |
+| `video_package` | **Video Package** | Multimedia | Narration script, storyboard beats, scene descriptions, visual recommendations, timecoded SRT subtitles (explicitly non-rendered video). |
+| `infographic` | **Infographic Spec** | Visual | Content blocks, layout recommendations, visual hierarchy, key metrics (explicitly non-rendered image). |
+
+### 3. Dynamic Format Extensibility via Configuration (`/generate/adapters/register`)
+Adding a new deliverable format requires **zero new code** — purely configuration:
+```bash
+curl -X POST http://localhost:8000/api/v1/generate/adapters/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "deliverable_type": "tactical_flash_bulletin",
+    "name": "Tactical Flash Bulletin",
+    "description": "Rapid frontline intelligence alert",
+    "category": "operational",
+    "system_prompt_template": "Generate concise tactical bulletins with source chunk citations.",
+    "block_structure": [
+      {"index": 0, "title": "Immediate Threat Situation"},
+      {"index": 1, "title": "Observed Asset Activity"},
+      {"index": 2, "title": "Mandated Action"}
+    ],
+    "requires_human_review": false
+  }'
+```
+
+### 4. Verification Suite & Standalone Verification Runner
+```powershell
+# Run complete backend pytest suite (42 passing unit & integration tests)
+conda run -n tri pytest backend/tests/ -v
+
+# Run standalone Phase 4 verification (all formats generated & traced)
+conda run -n tri python scripts/verify_phase4.py
+```
+
+---
+
 ## Phase Roadmap
 - **[x] Phase 0: Repo Scaffolding & Environment** — Running skeleton with all 5 services stubbed, zero egress network, health checks, CI stub.
 - **[x] Phase 1: Ingestion Pipeline** — Multi-modal file router (Docling, PaddleOCR, Whisper), common SourceDocument schema, AES-256 encryption at rest, append-only tamper-evident audit logging, and low-confidence flags.
 - **[x] Phase 2: Understanding & Chunking Layer** — Semantic paragraph/section-aware chunking preserving exact character offsets, entity/topic/intent/sensitive terms extraction, 384-dim dense embeddings, Qdrant vector store indexing, FalkorDB openCypher knowledge graph upsert, and claim-to-chunk provenance.
 - **[x] Phase 3: Grounding & Retrieval Service** — `/retrieve` hybrid vector-graph endpoint, `/trace` sentence-level and full deliverable provenance endpoint, hard claim-citation contract gatekeeper (100% verified across 10 sentences and 3 output types), and React interactive hovercard inspector.
-- **[ ] Phase 4: Output Generation Adapters** — LinkedIn, Twitter, Exec Summary, Advisory, Presentation, Video Package, Infographic.
+- **[x] Phase 4: Output Generation Adapters** — Common adapter interface, 7 modular adapters (LinkedIn, Twitter Thread, Executive Summary, Advisory, Presentation, Video Package, Infographic), dynamic config registration, multi-select concurrent generation, safety-critical human review gatekeeper, and interactive slide/storyboard/metric previews.
 - **[ ] Phase 5: Security & Audit Layer** — RBAC, tamper-evident hash chain verification, network-cut live proof.
 - **[ ] Phase 6: Human Review & Approval Workflow** — Draft state, sentence-level review, reviewer diff history, export lock.
 - **[ ] Phase 7: Operator Dashboard** — Complete interactive React UI with hover-to-source inspection.

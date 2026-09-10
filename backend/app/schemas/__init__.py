@@ -1,5 +1,12 @@
 """Pydantic schemas package."""
 
+from app.schemas.adapters import (
+    AdapterMetadataResponse,
+    DynamicAdapterConfig,
+    GenerateDeliverablesRequest,
+    GenerationParameters,
+    MultiDeliverableResponse,
+)
 from app.schemas.audit import AuditLogResponse, AuditVerificationResponse
 from app.schemas.grounding import (
     CreateDeliverableRequest,
@@ -67,4 +74,9 @@ __all__ = [
     "SentenceTraceResponse",
     "FullDeliverableTraceResponse",
     "DeliverableResponse",
+    "GenerationParameters",
+    "GenerateDeliverablesRequest",
+    "AdapterMetadataResponse",
+    "DynamicAdapterConfig",
+    "MultiDeliverableResponse",
 ]

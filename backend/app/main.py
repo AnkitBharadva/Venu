@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.adapters import router as adapters_router
 from app.api.audit import router as audit_router
 from app.api.grounding import router as grounding_router
 from app.api.health import router as health_router
@@ -65,6 +66,7 @@ app.include_router(ingestion_router)
 app.include_router(audit_router)
 app.include_router(understanding_router)
 app.include_router(grounding_router)
+app.include_router(adapters_router)
 
 
 @app.get("/")
