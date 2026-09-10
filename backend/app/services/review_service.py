@@ -14,7 +14,6 @@ import json
 import logging
 import uuid
 from datetime import UTC, datetime
-from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,7 +21,7 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.audit import record_audit_event
 from app.core.security import compute_sha256, save_encrypted_file
-from app.models.audit_log import GeneratedOutput, OutputEditHistory, SourceDocument
+from app.models.audit_log import GeneratedOutput, OutputEditHistory
 from app.schemas.grounding import DeliverableResponse
 from app.schemas.review import (
     EditHistoryItemResponse,
@@ -640,7 +639,7 @@ class ReviewService:
         export_format: str = "markdown",
     ) -> ExportDeliverableResponse:
         """Render and export an authorized deliverable with AES-256 encrypted archive storage.
-        
+
         Phase 6 Mandate: Export endpoint only serves 'final' status outputs. Attempting to export
         a 'draft' (or 'rejected') output fails with a clear error.
         """
@@ -869,7 +868,7 @@ class ReviewService:
             # Citation references footnote section
             if output.citations:
                 md_lines.extend(["---", "### Grounding Citations", ""])
-                for idx, c in enumerate(output.citations, 1):
+                for _idx, c in enumerate(output.citations, 1):
                     cid = str(c.get("chunk_id", "chunk"))[:8]
                     quote = c.get("quote", "")
                     md_lines.append(f"[^{cid}]: Chunk `{cid}`: *\"{quote}\"*")

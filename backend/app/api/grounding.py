@@ -162,6 +162,37 @@ async def trace_full_deliverable(
         ) from exc
 
 
+@router.get(
+    "/trace/{output_id}/{sentence_index}",
+    response_model=SentenceTraceResponse,
+    summary="Trace single sentence by output ID and sentence index path parameter",
+)
+async def trace_sentence_by_path(
+    output_id: uuid.UUID,
+    sentence_index: int,
+    session: AsyncSession = Depends(get_db),
+) -> SentenceTraceResponse:
+    """Convenience route allowing /trace/{output_id}/{sentence_index} path parameter syntax."""
+    try:
+        res = await GroundingTraceService.trace_sentence(
+            session=session,
+            output_id=output_id,
+            sentence_index=sentence_index,
+        )
+        return SentenceTraceResponse.model_validate(res)
+    except ValueError as val_err:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(val_err),
+        ) from val_err
+    except Exception as exc:
+        logger.error("Sentence trace by path failed: %s", exc, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Sentence trace failed: {exc}",
+        ) from exc
+
+
 @router.post(
     "/outputs",
     response_model=DeliverableResponse,

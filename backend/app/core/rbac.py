@@ -165,7 +165,7 @@ def create_access_token(user_id: str, role: str, expires_in: int = 86400) -> str
 
     header_b64 = _b64url_encode(json.dumps(header, separators=(",", ":")).encode("utf-8"))
     payload_b64 = _b64url_encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
-    signing_input = f"{header_b64}.{payload_b64}".encode("utf-8")
+    signing_input = f"{header_b64}.{payload_b64}".encode()
 
     key = settings.SECRET_KEY.encode("utf-8")
     signature = hmac.new(key, signing_input, hashlib.sha256).digest()
@@ -185,7 +185,7 @@ def verify_access_token(token: str) -> dict[str, Any]:
         )
 
     header_b64, payload_b64, sig_b64 = parts
-    signing_input = f"{header_b64}.{payload_b64}".encode("utf-8")
+    signing_input = f"{header_b64}.{payload_b64}".encode()
     key = settings.SECRET_KEY.encode("utf-8")
 
     expected_sig = hmac.new(key, signing_input, hashlib.sha256).digest()
