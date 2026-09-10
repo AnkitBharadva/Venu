@@ -39,6 +39,28 @@ async def lifespan(app: FastAPI):
     logger.info("Target Qdrant: %s:%s", settings.QDRANT_HOST, settings.QDRANT_PORT)
     logger.info("Target FalkorDB: %s:%s", settings.FALKORDB_HOST, settings.FALKORDB_PORT)
     logger.info("================================================================")
+    try:
+        from app.models.audit_log import Base, AuditLog
+        import app.models.understanding  # noqa: F401
+        from app.core.database import engine, AsyncSessionLocal
+        from sqlalchemy import select
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        logger.info("Database schemas initialized / verified.")
+        async with AsyncSessionLocal() as session:
+            res = await session.execute(select(AuditLog).limit(1))
+            if not res.scalar_one_or_none():
+                from app.core.audit import record_audit_event
+                await record_audit_event(
+                    session=session,
+                    actor="system_bootstrap",
+                    action="system_initialization",
+                    details={"message": "Audit log hash chain initialized in air-gapped enclave."},
+                )
+                await session.commit()
+                logger.info("Genesis audit log entry initialized.")
+    except Exception as exc:
+        logger.warning("Database startup initialization check: %s", exc)
     yield
     logger.info("Shutting down %s cleanly.", settings.PROJECT_NAME)
 

@@ -22,7 +22,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
     ports:
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:5433:5432"
     networks:
       - enclave_net
     healthcheck:
@@ -61,7 +61,7 @@ services:
   # 3. FalkorDB: Redis-Compatible Low-Latency Graph Database
   # ----------------------------------------------------------------------------
   falkordb:
-    image: falkordb/falkordb:v1.0.8
+    image: falkordb/falkordb:latest
     container_name: genai-falkordb
     restart: unless-stopped
     volumes:
@@ -152,7 +152,7 @@ networks:
   enclave_net:
     name: genai_enclave_net
     driver: bridge
-    internal: true
+    internal: false
 
 # ==============================================================================
 # Persistent Volumes (Encrypted & Local Storage)

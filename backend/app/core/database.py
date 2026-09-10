@@ -13,13 +13,19 @@ from app.core.config import get_settings
 logger = logging.getLogger("app.core.database")
 settings = get_settings()
 
+db_url = settings.async_database_url
+engine_kwargs: dict[str, Any] = {"echo": settings.DEBUG}
+if not db_url.startswith("sqlite"):
+    engine_kwargs.update({
+        "pool_size": 10,
+        "max_overflow": 20,
+        "pool_timeout": 5,
+        "pool_pre_ping": True,
+    })
+
 engine = create_async_engine(
-    settings.async_database_url,
-    echo=settings.DEBUG,
-    pool_size=10,
-    max_overflow=20,
-    pool_timeout=5,
-    pool_pre_ping=True,
+    db_url,
+    **engine_kwargs,
 )
 
 AsyncSessionLocal = async_sessionmaker(

@@ -29,18 +29,22 @@ def get_qdrant_client() -> QdrantClient:
     """Instantiate and return an air-gapped Qdrant client."""
     # Determine accessible host
     target_host = settings.QDRANT_HOST
-    try:
-        with socket.create_connection((settings.QDRANT_HOST, settings.QDRANT_PORT), timeout=0.1):
-            target_host = settings.QDRANT_HOST
-    except Exception:
+    if target_host in ("localhost", "127.0.0.1"):
         target_host = "127.0.0.1"
+    else:
+        try:
+            with socket.create_connection((settings.QDRANT_HOST, settings.QDRANT_PORT), timeout=0.1):
+                target_host = settings.QDRANT_HOST
+        except Exception:
+            target_host = "127.0.0.1"
 
     return QdrantClient(
         host=target_host,
         port=settings.QDRANT_PORT,
         grpc_port=settings.QDRANT_GRPC_PORT,
         prefer_grpc=False,
-        api_key=settings.QDRANT_API_KEY,
+        https=False,
+        api_key=settings.QDRANT_API_KEY or None,
         timeout=1.0,
         check_compatibility=False,
     )

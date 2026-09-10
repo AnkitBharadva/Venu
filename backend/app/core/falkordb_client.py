@@ -27,11 +27,14 @@ def is_falkordb_live(timeout: float = 0.2) -> bool:
 def get_redis_client() -> aioredis.Redis:
     """Return an async redis connection for FalkorDB."""
     target_host = settings.FALKORDB_HOST
-    try:
-        with socket.create_connection((settings.FALKORDB_HOST, settings.FALKORDB_PORT), timeout=0.1):
-            target_host = settings.FALKORDB_HOST
-    except Exception:
+    if target_host in ("localhost", "127.0.0.1"):
         target_host = "127.0.0.1"
+    else:
+        try:
+            with socket.create_connection((settings.FALKORDB_HOST, settings.FALKORDB_PORT), timeout=0.1):
+                target_host = settings.FALKORDB_HOST
+        except Exception:
+            target_host = "127.0.0.1"
 
     return aioredis.Redis(
         host=target_host,
