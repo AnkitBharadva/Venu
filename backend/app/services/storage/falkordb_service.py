@@ -61,6 +61,15 @@ class FalkorDBService:
         # 1. Update In-Memory Graph Index
         doc_str = str(doc_id)
         doc_node_id = f"doc_{doc_str}"
+
+        # Purge any previously indexed edges for this doc to prevent edge accumulation
+        self._edges = [
+            e for e in self._edges
+            if e.get("properties", {}).get("doc_id") != doc_str
+            and e.get("source") != doc_node_id
+            and e.get("target") != doc_node_id
+        ]
+
         self._nodes[doc_node_id] = {
             "id": doc_node_id,
             "label": filename,
@@ -110,6 +119,22 @@ class FalkorDBService:
                 "properties": {"doc_id": doc_str, "chunk_index": chunk.chunk_index},
             })
 
+        # Sequential Chunk Links: (Chunk i)-[:NEXT_CHUNK]->(Chunk i+1)
+        sorted_chunks = sorted(chunks, key=lambda c: c.chunk_index)
+        for idx in range(len(sorted_chunks) - 1):
+            c_curr_id = chunk_node_map[sorted_chunks[idx].chunk_id]
+            c_next_id = chunk_node_map[sorted_chunks[idx + 1].chunk_id]
+            self._edges.append({
+                "source": c_curr_id,
+                "target": c_next_id,
+                "relation": "NEXT_CHUNK",
+                "properties": {
+                    "doc_id": doc_str,
+                    "from_index": sorted_chunks[idx].chunk_index,
+                    "to_index": sorted_chunks[idx + 1].chunk_index,
+                },
+            })
+
         # Entities
         entity_node_map: dict[str, str] = {}
         for ent in entities:
@@ -131,6 +156,27 @@ class FalkorDBService:
                         "properties": {"doc_id": doc_str, "chunk_id": str(c_id)},
                     })
 
+        # Inter-Chunk Semantic Relationships via Shared Entities (deduplicated per chunk pair)
+        seen_chunk_shares: set[tuple[str, str]] = set()
+        for ent in entities:
+            valid_cids = [chunk_node_map[cid] for cid in ent.chunk_ids if cid in chunk_node_map]
+            for i in range(len(valid_cids)):
+                for j in range(i + 1, min(i + 3, len(valid_cids))):
+                    pair = (valid_cids[i], valid_cids[j])
+                    rev = (valid_cids[j], valid_cids[i])
+                    if pair not in seen_chunk_shares and rev not in seen_chunk_shares:
+                        seen_chunk_shares.add(pair)
+                        self._edges.append({
+                            "source": valid_cids[i],
+                            "target": valid_cids[j],
+                            "relation": "SHARES_ENTITY",
+                            "properties": {
+                                "doc_id": doc_str,
+                                "entity": ent.name,
+                                "entity_type": ent.type,
+                            },
+                        })
+
         # Relationships
         for rel in relationships:
             src_node = entity_node_map.get(rel.source)
@@ -146,6 +192,36 @@ class FalkorDBService:
                         "doc_id": doc_str,
                     },
                 })
+
+        # Inter-Chunk Semantic Bridges via Entity Relationships (deduplicated per chunk pair)
+        seen_chunk_bridges: set[tuple[str, str]] = set()
+        ent_chunks_map: dict[str, set[str]] = {}
+        for ent in entities:
+            ent_chunks_map[ent.name] = {
+                chunk_node_map[cid] for cid in ent.chunk_ids if cid in chunk_node_map
+            }
+
+        for rel in relationships:
+            src_chunks = ent_chunks_map.get(rel.source, set())
+            tgt_chunks = ent_chunks_map.get(rel.target, set())
+            for sc in src_chunks:
+                for tc in tgt_chunks:
+                    if sc != tc:
+                        pair = (sc, tc)
+                        rev = (tc, sc)
+                        if pair not in seen_chunk_bridges and rev not in seen_chunk_bridges:
+                            seen_chunk_bridges.add(pair)
+                            self._edges.append({
+                                "source": sc,
+                                "target": tc,
+                                "relation": "CROSS_CHUNK_RELATION",
+                                "properties": {
+                                    "doc_id": doc_str,
+                                    "source_entity": rel.source,
+                                    "target_entity": rel.target,
+                                    "relation": rel.relation,
+                                },
+                            })
 
         # 2. Synchronize to Live FalkorDB if reachable
         is_live = await self._is_live()
@@ -211,6 +287,57 @@ class FalkorDBService:
                     f"MERGE (s)-[:RELATION {{relation: '{esc_r}'{c_prop}}}]->(t)"
                 )
                 await client.execute_command("GRAPH.QUERY", self.graph_name, cypher_rel)
+
+            # Upsert Inter-Chunk Sequential NEXT_CHUNK edges
+            for idx in range(len(sorted_chunks) - 1):
+                c1_id = str(sorted_chunks[idx].chunk_id)
+                c2_id = str(sorted_chunks[idx + 1].chunk_id)
+                cypher_next = (
+                    f"MATCH (c1:Chunk {{id: '{c1_id}'}}), (c2:Chunk {{id: '{c2_id}'}}) "
+                    f"MERGE (c1)-[:NEXT_CHUNK {{doc_id: '{doc_str}', from_index: {sorted_chunks[idx].chunk_index}, to_index: {sorted_chunks[idx + 1].chunk_index}}}]->(c2)"
+                )
+                await client.execute_command("GRAPH.QUERY", self.graph_name, cypher_next)
+
+            # Upsert Inter-Chunk SHARES_ENTITY edges (deduplicated)
+            seen_cypher_shares: set[tuple[str, str]] = set()
+            for ent in entities:
+                esc_ent = ent.name.replace("'", "\\'")
+                valid_cids = [str(cid) for cid in ent.chunk_ids if cid in chunk_node_map]
+                for i in range(len(valid_cids)):
+                    for j in range(i + 1, min(i + 3, len(valid_cids))):
+                        c_pair = (valid_cids[i], valid_cids[j])
+                        rev_c_pair = (valid_cids[j], valid_cids[i])
+                        if c_pair not in seen_cypher_shares and rev_c_pair not in seen_cypher_shares:
+                            seen_cypher_shares.add(c_pair)
+                            cypher_se = (
+                                f"MATCH (c1:Chunk {{id: '{valid_cids[i]}'}}), (c2:Chunk {{id: '{valid_cids[j]}'}}) "
+                                f"MERGE (c1)-[:SHARES_ENTITY {{doc_id: '{doc_str}', entity: '{esc_ent}'}}]->(c2)"
+                            )
+                            await client.execute_command("GRAPH.QUERY", self.graph_name, cypher_se)
+
+            # Upsert Inter-Chunk CROSS_CHUNK_RELATION edges (deduplicated)
+            seen_cypher_bridges: set[tuple[str, str]] = set()
+            raw_ent_chunks: dict[str, set[str]] = {}
+            for ent in entities:
+                raw_ent_chunks[ent.name] = {
+                    str(cid) for cid in ent.chunk_ids if cid in chunk_node_map
+                }
+            for rel in relationships:
+                esc_rel = rel.relation.replace("'", "\\'")
+                s_chunks = raw_ent_chunks.get(rel.source, set())
+                t_chunks = raw_ent_chunks.get(rel.target, set())
+                for sc in s_chunks:
+                    for tc in t_chunks:
+                        if sc != tc:
+                            b_pair = (sc, tc)
+                            rev_b_pair = (tc, sc)
+                            if b_pair not in seen_cypher_bridges and rev_b_pair not in seen_cypher_bridges:
+                                seen_cypher_bridges.add(b_pair)
+                                cypher_ccr = (
+                                    f"MATCH (c1:Chunk {{id: '{sc}'}}), (c2:Chunk {{id: '{tc}'}}) "
+                                    f"MERGE (c1)-[:CROSS_CHUNK_RELATION {{doc_id: '{doc_str}', relation: '{esc_rel}'}}]->(c2)"
+                                )
+                                await client.execute_command("GRAPH.QUERY", self.graph_name, cypher_ccr)
 
             logger.info("Successfully upserted document graph topology to FalkorDB for doc %s", doc_id)
             return True
@@ -383,6 +510,24 @@ class FalkorDBService:
             nodes=nodes,
             edges=edges,
         )
+
+    async def clear_all(self) -> bool:
+        """Clear all nodes and edges from FalkorDB and in-memory index."""
+        self._nodes.clear()
+        self._edges.clear()
+        if await self._is_live():
+            from app.core.falkordb_client import get_redis_client
+            client = get_redis_client()
+            try:
+                await client.execute_command("GRAPH.DELETE", self.graph_name)
+                logger.info("FalkorDB graph '%s' deleted successfully.", self.graph_name)
+                return True
+            except Exception as exc:
+                logger.warning("Failed to delete FalkorDB graph: %s", exc)
+                return False
+            finally:
+                await client.aclose()
+        return True
 
 
 _falkordb_service_instance: FalkorDBService | None = None

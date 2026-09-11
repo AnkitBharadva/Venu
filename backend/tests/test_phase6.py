@@ -179,8 +179,15 @@ async def test_reviewer_accept_and_reject_sentences(
     """Task 2: Reviewer can individually accept and reject sentences."""
     output_id = seeded_document_with_draft_output["output_id"]
     output = seeded_document_with_draft_output["deliverable"]
-    sent0 = output["content"]["blocks"][0]["sentences"][0]["sentence_id"]
-    sent1 = output["content"]["blocks"][0]["sentences"][1]["sentence_id"]
+    all_sentences = [
+        (b_idx, s_idx, s)
+        for b_idx, b in enumerate(output["content"]["blocks"])
+        for s_idx, s in enumerate(b["sentences"])
+    ]
+    b0_idx, s0_idx, sent0_obj = all_sentences[0]
+    b1_idx, s1_idx, sent1_obj = all_sentences[1]
+    sent0 = sent0_obj["sentence_id"]
+    sent1 = sent1_obj["sentence_id"]
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         # Accept sent0
@@ -190,7 +197,7 @@ async def test_reviewer_accept_and_reject_sentences(
             headers={"Authorization": f"Bearer {reviewer_token}"},
         )
         assert res0.status_code == 200
-        assert res0.json()["content"]["blocks"][0]["sentences"][0]["review_status"] == "accepted"
+        assert res0.json()["content"]["blocks"][b0_idx]["sentences"][s0_idx]["review_status"] == "accepted"
 
         # Reject sent1
         res1 = await client.post(
@@ -199,7 +206,7 @@ async def test_reviewer_accept_and_reject_sentences(
             headers={"Authorization": f"Bearer {reviewer_token}"},
         )
         assert res1.status_code == 200
-        assert res1.json()["content"]["blocks"][0]["sentences"][1]["review_status"] == "rejected"
+        assert res1.json()["content"]["blocks"][b1_idx]["sentences"][s1_idx]["review_status"] == "rejected"
 
 
 @pytest.mark.anyio

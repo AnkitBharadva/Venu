@@ -7,20 +7,24 @@ Exposes:
 """
 
 import logging
+import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.rbac import Permission, UserContext, require_permission
 from app.schemas.adapters import (
     AdapterMetadataResponse,
     DynamicAdapterConfig,
     GenerateDeliverablesRequest,
     MultiDeliverableResponse,
 )
+from app.schemas.review import ExportDeliverableRequest, ExportDeliverableResponse
 from app.services.adapters.orchestrator import AdapterOrchestrationService
 from app.services.adapters.registry import get_adapter_registry
 from app.services.grounding.contract_enforcer import GroundingContractError
+from app.services.review_service import HumanReviewRequiredError, ReviewService
 
 logger = logging.getLogger("app.api.adapters")
 
@@ -108,3 +112,65 @@ async def register_dynamic_adapter(
         supported_tones=["objective", "authoritative", "technical"],
         output_schema_preview={"type": "GroundedDeliverableContent", "config_driven": True},
     )
+
+
+adapters_alias_router = APIRouter(prefix="/api/v1/adapters", tags=["Adapters Alias"])
+
+
+async def _handle_adapter_export(
+    output_id: uuid.UUID,
+    format: str | None,
+    body: ExportDeliverableRequest | None,
+    session: AsyncSession,
+    user: UserContext,
+) -> ExportDeliverableResponse:
+    target_format = (body.export_format if body and body.export_format else format) or "markdown"
+    try:
+        return await ReviewService.export_deliverable(
+            session=session,
+            output_id=output_id,
+            actor=user.user_id,
+            export_format=target_format,
+        )
+    except HumanReviewRequiredError as hr_err:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": "HumanReviewRequired",
+                "message": str(hr_err),
+                "output_id": str(output_id),
+            },
+        ) from hr_err
+    except ValueError as err:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(err)) from err
+
+
+@adapters_alias_router.post(
+    "/export/{output_id}",
+    response_model=ExportDeliverableResponse,
+    summary="Export deliverable (adapters alias)",
+)
+async def export_via_adapters_alias(
+    output_id: uuid.UUID,
+    format: str = Query(default="markdown"),
+    body: ExportDeliverableRequest = ExportDeliverableRequest(),
+    session: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(require_permission(Permission.EXPORT)),
+) -> ExportDeliverableResponse:
+    return await _handle_adapter_export(output_id, format, body, session, user)
+
+
+@router.post(
+    "/export/{output_id}",
+    response_model=ExportDeliverableResponse,
+    summary="Export deliverable (generate alias)",
+)
+async def export_via_generate_alias(
+    output_id: uuid.UUID,
+    format: str = Query(default="markdown"),
+    body: ExportDeliverableRequest = ExportDeliverableRequest(),
+    session: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(require_permission(Permission.EXPORT)),
+) -> ExportDeliverableResponse:
+    return await _handle_adapter_export(output_id, format, body, session, user)
+

@@ -119,10 +119,54 @@ async def get_document_understanding(
 )
 async def get_document_graph(
     doc_id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
 ) -> GraphVisualizationResponse:
     """Retrieve graph nodes and edges for visualization in frontend."""
     falkor = get_falkordb_service()
-    return falkor.get_document_graph(doc_id=doc_id)
+    res = falkor.get_document_graph(doc_id=doc_id)
+    if not res.nodes or len(res.nodes) <= 1:
+        from sqlalchemy import select
+        from app.models.understanding import DocumentUnderstanding, DocumentChunk
+        from app.models.audit_log import SourceDocument
+        from app.schemas.understanding import ExtractedChunk, EntityMention, EntityRelationship
+
+        und_stmt = select(DocumentUnderstanding).where(DocumentUnderstanding.doc_id == doc_id)
+        und_row = (await session.execute(und_stmt)).scalar_one_or_none()
+
+        chunk_stmt = select(DocumentChunk).where(DocumentChunk.doc_id == doc_id).order_by(DocumentChunk.chunk_index)
+        chunk_rows = (await session.execute(chunk_stmt)).scalars().all()
+
+        doc_stmt = select(SourceDocument).where(SourceDocument.doc_id == doc_id)
+        doc_row = (await session.execute(doc_stmt)).scalar_one_or_none()
+
+        if und_row and chunk_rows:
+            extracted_chunks = [
+                ExtractedChunk(
+                    chunk_id=c.chunk_id,
+                    chunk_index=c.chunk_index,
+                    text=c.text,
+                    char_offset_start=c.char_offset_start,
+                    char_offset_end=c.char_offset_end,
+                    page_number=c.page_number,
+                    heading=c.heading,
+                )
+                for c in chunk_rows
+            ]
+            key_entities = [EntityMention(**e) for e in (und_row.key_entities or [])]
+            relationships = [EntityRelationship(**r) for r in (und_row.relationships or [])]
+            topics = und_row.topics or []
+            filename = doc_row.original_filename if doc_row else "Document"
+
+            await falkor.upsert_document_graph(
+                doc_id=doc_id,
+                filename=filename,
+                chunks=extracted_chunks,
+                entities=key_entities,
+                relationships=relationships,
+                topics=topics,
+            )
+            res = falkor.get_document_graph(doc_id=doc_id)
+    return res
 
 
 @router.post(

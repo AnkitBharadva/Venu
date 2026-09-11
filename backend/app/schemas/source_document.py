@@ -68,3 +68,23 @@ class DocumentSummary(BaseModel):
     checksum: str
     char_count: int = 0
     low_confidence: bool = False
+
+
+class BatchUploadItem(BaseModel):
+    """Result of an individual file in a batch upload."""
+
+    filename: str
+    status: str = "success"
+    doc_id: uuid.UUID | None = None
+    document: SourceDocumentResponse | None = None
+    error: str | None = None
+
+
+class BatchUploadResponse(BaseModel):
+    """Aggregate response for multi-file batch upload."""
+
+    status: str = "success"
+    total_files: int
+    successful_count: int
+    failed_count: int
+    items: list[BatchUploadItem]

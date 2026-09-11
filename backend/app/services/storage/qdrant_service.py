@@ -253,6 +253,24 @@ class QdrantService:
 
         return True
 
+    def clear_all(self) -> bool:
+        """Clear all vectors from Qdrant and reset in-memory store."""
+        self._in_memory_store.clear()
+        if self._is_live():
+            try:
+                client = get_qdrant_client()
+                collections = client.get_collections().collections
+                existing = {c.name for c in collections}
+                if self.collection_name in existing:
+                    client.delete_collection(collection_name=self.collection_name)
+                self.ensure_collection()
+                logger.info("Qdrant collection '%s' reset successfully.", self.collection_name)
+                return True
+            except Exception as exc:
+                logger.warning("Failed to reset Qdrant collection: %s", exc)
+                return False
+        return True
+
 
 _qdrant_service_instance: QdrantService | None = None
 

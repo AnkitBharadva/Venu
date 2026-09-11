@@ -25,6 +25,8 @@ from app.core.database import get_db
 from app.core.security import read_decrypted_file
 from app.models.audit_log import SourceDocument
 from app.schemas.source_document import (
+    BatchUploadItem,
+    BatchUploadResponse,
     DocumentSummary,
     DocumentUploadResponse,
     SourceDocumentResponse,
@@ -193,4 +195,157 @@ async def verify_encryption_at_rest(
         "decryption_successful": len(decrypted) > 0,
         "checksum_matches": doc.checksum == __import__("hashlib").sha256(decrypted).hexdigest(),
         "encrypted_at_rest": not is_plain and len(decrypted) > 0,
+    }
+
+
+@router.post(
+    "/upload-batch",
+    response_model=BatchUploadResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Upload and ingest multiple source documents at once",
+)
+async def upload_documents_batch(
+    files: list[UploadFile] = File(..., description="List of source files to ingest"),
+    uploader_id: str = Form(default="operator_default"),
+    session: AsyncSession = Depends(get_db),
+) -> BatchUploadResponse:
+    """Accepts multiple source files simultaneously, ingesting and normalizing each into PostgreSQL with AES-256-GCM encryption."""
+    if not files:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No files provided.",
+        )
+
+    items: list[BatchUploadItem] = []
+    success_count = 0
+    fail_count = 0
+
+    for file in files:
+        if not file.filename:
+            fail_count += 1
+            items.append(BatchUploadItem(filename="unnamed", status="failed", error="Empty filename"))
+            continue
+        try:
+            file_bytes = await file.read()
+            if len(file_bytes) == 0:
+                fail_count += 1
+                items.append(BatchUploadItem(filename=file.filename, status="failed", error="File is empty (0 bytes)"))
+                continue
+
+            doc_record = await ingest_source_document(
+                session=session,
+                file_bytes=file_bytes,
+                filename=file.filename,
+                declared_content_type=file.content_type,
+                uploader_id=uploader_id,
+            )
+            doc_response = SourceDocumentResponse.model_validate(doc_record)
+            success_count += 1
+            items.append(
+                BatchUploadItem(
+                    filename=file.filename,
+                    status="success",
+                    doc_id=doc_record.doc_id,
+                    document=doc_response,
+                )
+            )
+        except Exception as exc:
+            fail_count += 1
+            items.append(
+                BatchUploadItem(
+                    filename=file.filename,
+                    status="failed",
+                    error=str(exc),
+                )
+            )
+
+    return BatchUploadResponse(
+        status="success" if success_count > 0 else "failed",
+        total_files=len(files),
+        successful_count=success_count,
+        failed_count=fail_count,
+        items=items,
+    )
+
+
+@router.post(
+    "/clear-database",
+    summary="Purge all ingested documents, chunks, vectors, graph relations, and deliverables",
+)
+@router.delete(
+    "/clear-database",
+    summary="Purge all ingested documents, chunks, vectors, graph relations, and deliverables",
+)
+async def clear_database(
+    actor: str = "operator_admin",
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """Completely resets PostgreSQL tables, Qdrant vector collection, FalkorDB graph, and disk storage."""
+    import os
+    from pathlib import Path
+    from sqlalchemy import delete
+    from app.core.config import get_settings
+    from app.core.audit import record_audit_event
+    from app.models.audit_log import SourceDocument, AuditLog, GeneratedOutput, OutputEditHistory
+    from app.models.understanding import DocumentChunk, DocumentUnderstanding
+    from app.services.storage.qdrant_service import get_qdrant_service
+    from app.services.storage.falkordb_service import get_falkordb_service
+
+    settings = get_settings()
+
+    # 1. Purge PostgreSQL Tables in dependency order
+    await session.execute(delete(OutputEditHistory))
+    await session.execute(delete(GeneratedOutput))
+    await session.execute(delete(DocumentChunk))
+    await session.execute(delete(DocumentUnderstanding))
+    await session.execute(delete(SourceDocument))
+    await session.execute(delete(AuditLog))
+
+    # 2. Purge Encrypted Files on Disk
+    storage_dir = Path(settings.ENCRYPTED_STORAGE_PATH)
+    deleted_files_count = 0
+    if storage_dir.exists():
+        for enc_file in storage_dir.glob("*.enc"):
+            try:
+                os.remove(enc_file)
+                deleted_files_count += 1
+            except Exception:
+                pass
+
+    # 3. Purge Qdrant Vector Collection
+    qdrant = get_qdrant_service()
+    qdrant_success = qdrant.clear_all()
+
+    # 4. Purge FalkorDB Knowledge Graph
+    falkor = get_falkordb_service()
+    falkor_success = await falkor.clear_all()
+
+    # 5. Initialize Fresh Genesis Audit Entry
+    await record_audit_event(
+        session=session,
+        actor=actor,
+        action="database_purge",
+        details={
+            "message": "Complete system reset performed. All document tables, vectors, and graph purged.",
+            "deleted_encrypted_files": deleted_files_count,
+            "qdrant_reset": qdrant_success,
+            "falkordb_reset": falkor_success,
+        },
+    )
+    await session.commit()
+
+    return {
+        "status": "success",
+        "message": "Database and vector/graph stores completely cleared.",
+        "tables_cleared": [
+            "source_documents",
+            "document_chunks",
+            "document_understanding",
+            "generated_outputs",
+            "output_edit_history",
+            "audit_log",
+        ],
+        "deleted_encrypted_files": deleted_files_count,
+        "qdrant_reset": qdrant_success,
+        "falkordb_reset": falkor_success,
     }

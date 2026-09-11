@@ -648,6 +648,12 @@ class ReviewService:
         if output.status == "rejected":
             raise ValueError(f"Cannot export rejected deliverable '{output_id}'.")
 
+        if output.status not in ("approved", "final"):
+            raise HumanReviewRequiredError(
+                f"Deliverable '{output_id}' is currently in status '{output.status}'. "
+                f"Export authorization requires explicit human reviewer approval (transition to status 'final') before release."
+            )
+
         # Render content based on format
         rendered_content = cls._render_export_content(output, export_format.lower())
         rendered_bytes = rendered_content.encode("utf-8")

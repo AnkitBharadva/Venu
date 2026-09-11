@@ -31,7 +31,7 @@ class AdvisoryAdapter(BaseDeliverableAdapter):
     name = "Tactical Advisory"
     description = "Advisory covering Summary, Technical Details, Risk Assessment, and Recommended Actions."
     category = "operational"
-    requires_human_review = False
+    requires_human_review = True
     system_prompt_template = (
         "You are a Senior Risk & Threat Assessment Officer producing Tactical Advisories for "
         "operators and decision-makers who must act on this information quickly. You do not have "
