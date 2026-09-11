@@ -95,7 +95,7 @@ class OllamaService:
         prompt: str,
         system_prompt: str | None = None,
         model_name: str | None = None,
-        temperature: float = 0.2,
+        temperature: float = 0.15,
         max_tokens: int = 1024,
     ) -> str | None:
         """Generate text using local Ollama model with grounding constraints.
@@ -117,6 +117,8 @@ class OllamaService:
                 "temperature": temperature,
                 "num_predict": max_tokens,
                 "num_ctx": 4096,
+                "top_k": 20,
+                "top_p": 0.9,
             },
         }
         if system_prompt:

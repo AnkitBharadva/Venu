@@ -156,26 +156,25 @@ class FalkorDBService:
                         "properties": {"doc_id": doc_str, "chunk_id": str(c_id)},
                     })
 
-        # Inter-Chunk Semantic Relationships via Shared Entities (deduplicated per chunk pair)
+        # Inter-Chunk Semantic Relationships via Shared Entities (linear chain avoids O(K^2) edge explosion)
         seen_chunk_shares: set[tuple[str, str]] = set()
         for ent in entities:
             valid_cids = [chunk_node_map[cid] for cid in ent.chunk_ids if cid in chunk_node_map]
-            for i in range(len(valid_cids)):
-                for j in range(i + 1, min(i + 3, len(valid_cids))):
-                    pair = (valid_cids[i], valid_cids[j])
-                    rev = (valid_cids[j], valid_cids[i])
-                    if pair not in seen_chunk_shares and rev not in seen_chunk_shares:
-                        seen_chunk_shares.add(pair)
-                        self._edges.append({
-                            "source": valid_cids[i],
-                            "target": valid_cids[j],
-                            "relation": "SHARES_ENTITY",
-                            "properties": {
-                                "doc_id": doc_str,
-                                "entity": ent.name,
-                                "entity_type": ent.type,
-                            },
-                        })
+            for i in range(len(valid_cids) - 1):
+                pair = (valid_cids[i], valid_cids[i + 1])
+                rev = (valid_cids[i + 1], valid_cids[i])
+                if pair not in seen_chunk_shares and rev not in seen_chunk_shares:
+                    seen_chunk_shares.add(pair)
+                    self._edges.append({
+                        "source": valid_cids[i],
+                        "target": valid_cids[i + 1],
+                        "relation": "SHARES_ENTITY",
+                        "properties": {
+                            "doc_id": doc_str,
+                            "entity": ent.name,
+                            "entity_type": ent.type,
+                        },
+                    })
 
         # Relationships
         for rel in relationships:
@@ -193,35 +192,51 @@ class FalkorDBService:
                     },
                 })
 
-        # Inter-Chunk Semantic Bridges via Entity Relationships (deduplicated per chunk pair)
+        # Inter-Chunk Semantic Bridges via Entity Relationships:
+        # Instead of Cartesian product across all mentions, bridge the single closest chunk pair
         seen_chunk_bridges: set[tuple[str, str]] = set()
-        ent_chunks_map: dict[str, set[str]] = {}
+        ent_chunks_map: dict[str, list[str]] = {}
         for ent in entities:
-            ent_chunks_map[ent.name] = {
+            ent_chunks_map[ent.name] = [
                 chunk_node_map[cid] for cid in ent.chunk_ids if cid in chunk_node_map
-            }
+            ]
 
         for rel in relationships:
-            src_chunks = ent_chunks_map.get(rel.source, set())
-            tgt_chunks = ent_chunks_map.get(rel.target, set())
+            src_chunks = ent_chunks_map.get(rel.source, [])
+            tgt_chunks = ent_chunks_map.get(rel.target, [])
+            best_pair: tuple[str, str] | None = None
+            best_dist = float("inf")
+
             for sc in src_chunks:
                 for tc in tgt_chunks:
                     if sc != tc:
                         pair = (sc, tc)
                         rev = (tc, sc)
                         if pair not in seen_chunk_bridges and rev not in seen_chunk_bridges:
-                            seen_chunk_bridges.add(pair)
-                            self._edges.append({
-                                "source": sc,
-                                "target": tc,
-                                "relation": "CROSS_CHUNK_RELATION",
-                                "properties": {
-                                    "doc_id": doc_str,
-                                    "source_entity": rel.source,
-                                    "target_entity": rel.target,
-                                    "relation": rel.relation,
-                                },
-                            })
+                            # Estimate chunk distance
+                            try:
+                                sc_idx = int(sc.split("_")[-1]) if sc.split("_")[-1].isdigit() else 0
+                                tc_idx = int(tc.split("_")[-1]) if tc.split("_")[-1].isdigit() else 0
+                                dist = abs(sc_idx - tc_idx)
+                            except Exception:
+                                dist = 1
+                            if dist < best_dist:
+                                best_dist = dist
+                                best_pair = pair
+
+            if best_pair:
+                seen_chunk_bridges.add(best_pair)
+                self._edges.append({
+                    "source": best_pair[0],
+                    "target": best_pair[1],
+                    "relation": "CROSS_CHUNK_RELATION",
+                    "properties": {
+                        "doc_id": doc_str,
+                        "source_entity": rel.source,
+                        "target_entity": rel.target,
+                        "relation": rel.relation,
+                    },
+                })
 
         # 2. Synchronize to Live FalkorDB if reachable
         is_live = await self._is_live()
@@ -298,46 +313,58 @@ class FalkorDBService:
                 )
                 await client.execute_command("GRAPH.QUERY", self.graph_name, cypher_next)
 
-            # Upsert Inter-Chunk SHARES_ENTITY edges (deduplicated)
+            # Upsert Inter-Chunk SHARES_ENTITY edges (linear spanning chain)
             seen_cypher_shares: set[tuple[str, str]] = set()
             for ent in entities:
                 esc_ent = ent.name.replace("'", "\\'")
                 valid_cids = [str(cid) for cid in ent.chunk_ids if cid in chunk_node_map]
-                for i in range(len(valid_cids)):
-                    for j in range(i + 1, min(i + 3, len(valid_cids))):
-                        c_pair = (valid_cids[i], valid_cids[j])
-                        rev_c_pair = (valid_cids[j], valid_cids[i])
-                        if c_pair not in seen_cypher_shares and rev_c_pair not in seen_cypher_shares:
-                            seen_cypher_shares.add(c_pair)
-                            cypher_se = (
-                                f"MATCH (c1:Chunk {{id: '{valid_cids[i]}'}}), (c2:Chunk {{id: '{valid_cids[j]}'}}) "
-                                f"MERGE (c1)-[:SHARES_ENTITY {{doc_id: '{doc_str}', entity: '{esc_ent}'}}]->(c2)"
-                            )
-                            await client.execute_command("GRAPH.QUERY", self.graph_name, cypher_se)
+                for i in range(len(valid_cids) - 1):
+                    c_pair = (valid_cids[i], valid_cids[i + 1])
+                    rev_c_pair = (valid_cids[i + 1], valid_cids[i])
+                    if c_pair not in seen_cypher_shares and rev_c_pair not in seen_cypher_shares:
+                        seen_cypher_shares.add(c_pair)
+                        cypher_se = (
+                            f"MATCH (c1:Chunk {{id: '{valid_cids[i]}'}}), (c2:Chunk {{id: '{valid_cids[i + 1]}'}})"
+                            f" MERGE (c1)-[:SHARES_ENTITY {{doc_id: '{doc_str}', entity: '{esc_ent}'}}]->(c2)"
+                        )
+                        await client.execute_command("GRAPH.QUERY", self.graph_name, cypher_se)
 
-            # Upsert Inter-Chunk CROSS_CHUNK_RELATION edges (deduplicated)
+            # Upsert Inter-Chunk CROSS_CHUNK_RELATION edges (single closest pair per relationship)
             seen_cypher_bridges: set[tuple[str, str]] = set()
-            raw_ent_chunks: dict[str, set[str]] = {}
+            raw_ent_chunks: dict[str, list[str]] = {}
             for ent in entities:
-                raw_ent_chunks[ent.name] = {
+                raw_ent_chunks[ent.name] = [
                     str(cid) for cid in ent.chunk_ids if cid in chunk_node_map
-                }
+                ]
             for rel in relationships:
                 esc_rel = rel.relation.replace("'", "\\'")
-                s_chunks = raw_ent_chunks.get(rel.source, set())
-                t_chunks = raw_ent_chunks.get(rel.target, set())
+                s_chunks = raw_ent_chunks.get(rel.source, [])
+                t_chunks = raw_ent_chunks.get(rel.target, [])
+                best_cypher_pair: tuple[str, str] | None = None
+                best_cypher_dist = float("inf")
                 for sc in s_chunks:
                     for tc in t_chunks:
                         if sc != tc:
                             b_pair = (sc, tc)
                             rev_b_pair = (tc, sc)
                             if b_pair not in seen_cypher_bridges and rev_b_pair not in seen_cypher_bridges:
-                                seen_cypher_bridges.add(b_pair)
-                                cypher_ccr = (
-                                    f"MATCH (c1:Chunk {{id: '{sc}'}}), (c2:Chunk {{id: '{tc}'}}) "
-                                    f"MERGE (c1)-[:CROSS_CHUNK_RELATION {{doc_id: '{doc_str}', relation: '{esc_rel}'}}]->(c2)"
-                                )
-                                await client.execute_command("GRAPH.QUERY", self.graph_name, cypher_ccr)
+                                try:
+                                    sc_idx = int(sc.split("_")[-1]) if sc.split("_")[-1].isdigit() else 0
+                                    tc_idx = int(tc.split("_")[-1]) if tc.split("_")[-1].isdigit() else 0
+                                    dist = abs(sc_idx - tc_idx)
+                                except Exception:
+                                    dist = 1
+                                if dist < best_cypher_dist:
+                                    best_cypher_dist = dist
+                                    best_cypher_pair = b_pair
+
+                if best_cypher_pair:
+                    seen_cypher_bridges.add(best_cypher_pair)
+                    cypher_ccr = (
+                        f"MATCH (c1:Chunk {{id: '{best_cypher_pair[0]}'}}), (c2:Chunk {{id: '{best_cypher_pair[1]}'}}) "
+                        f"MERGE (c1)-[:CROSS_CHUNK_RELATION {{doc_id: '{doc_str}', relation: '{esc_rel}'}}]->(c2)"
+                    )
+                    await client.execute_command("GRAPH.QUERY", self.graph_name, cypher_ccr)
 
             logger.info("Successfully upserted document graph topology to FalkorDB for doc %s", doc_id)
             return True
@@ -481,9 +508,27 @@ class FalkorDBService:
             if e["properties"].get("doc_id") == doc_str or e["source"] == doc_node_id or e["target"] == doc_node_id
         ]
 
+        # Prioritize edges: structural hierarchy > sequence > entity relations > mentions > bridges
+        def edge_priority(edge: dict) -> int:
+            rel = edge.get("relation", "")
+            if rel in ("HAS_CHUNK", "HAS_TOPIC"):
+                return 0
+            if rel == "NEXT_CHUNK":
+                return 1
+            if str(edge.get("source", "")).startswith("ent_") and str(edge.get("target", "")).startswith("ent_"):
+                return 2
+            if rel == "MENTIONS":
+                return 3
+            if rel == "SHARES_ENTITY":
+                return 4
+            return 5
+
+        doc_edges.sort(key=edge_priority)
+        pruned_edges = doc_edges[:120]
+
         # Gather node IDs involved
         relevant_node_ids = {doc_node_id}
-        for e in doc_edges:
+        for e in pruned_edges:
             relevant_node_ids.add(e["source"])
             relevant_node_ids.add(e["target"])
 
@@ -497,7 +542,7 @@ class FalkorDBService:
                     properties=n["properties"],
                 ))
 
-        for e in doc_edges:
+        for e in pruned_edges:
             edges.append(GraphEdge(
                 source=e["source"],
                 target=e["target"],

@@ -40,23 +40,25 @@ class LocalEmbedder:
         self._try_load_local_weights()
 
     def _try_load_local_weights(self) -> None:
-        """Attempt to load weights from the mounted offline /models directory if present."""
-        if not os.path.exists(self.models_dir):
-            return
-
-        model_path = os.path.join(self.models_dir, "bge-small-en-v1.5")
-        if not os.path.exists(model_path):
-            return
-
-        # If fastembed or sentence-transformers is available locally with local weights
+        """Attempt to load local FastEmbed ONNX weights for BAAI/bge-small-en-v1.5."""
         try:
             from fastembed import TextEmbedding
 
-            self._local_model = TextEmbedding(model_name=model_path, local_files_only=True)
+            # 1. Try local mounted directory first if specified
+            if os.path.exists(self.models_dir):
+                model_path = os.path.join(self.models_dir, "bge-small-en-v1.5")
+                if os.path.exists(model_path):
+                    self._local_model = TextEmbedding(model_name=model_path, local_files_only=True)
+                    self._initialized = True
+                    logger.info("Loaded local FastEmbed model from mounted directory %s", model_path)
+                    return
+
+            # 2. Use cached FastEmbed BAAI/bge-small-en-v1.5 model
+            self._local_model = TextEmbedding(model_name="BAAI/bge-small-en-v1.5")
             self._initialized = True
-            logger.info("Loaded local FastEmbed model from %s", model_path)
+            logger.info("Initialized local FastEmbed BAAI/bge-small-en-v1.5 ONNX model")
         except Exception as exc:
-            logger.debug("Could not load FastEmbed weights: %s. Using deterministic projector.", exc)
+            logger.debug("FastEmbed initialization fallback: %s. Using deterministic projector.", exc)
 
     def embed_text(self, text: str) -> list[float]:
         """Embed a single string into a 384-dimensional unit vector."""

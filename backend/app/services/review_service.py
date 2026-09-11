@@ -651,7 +651,7 @@ class ReviewService:
         if output.status not in ("approved", "final"):
             raise HumanReviewRequiredError(
                 f"Deliverable '{output_id}' is currently in status '{output.status}'. "
-                f"Export authorization requires explicit human reviewer approval (transition to status 'final') before release."
+                f"Export authorization requires explicit human reviewer approval before export (transition to status 'final') before release."
             )
 
         # Render content based on format

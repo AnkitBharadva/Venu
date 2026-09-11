@@ -302,15 +302,16 @@ async def clear_database(
     await session.execute(delete(AuditLog))
 
     # 2. Purge Encrypted Files on Disk
-    storage_dir = Path(settings.ENCRYPTED_STORAGE_PATH)
     deleted_files_count = 0
-    if storage_dir.exists():
-        for enc_file in storage_dir.glob("*.enc"):
-            try:
-                os.remove(enc_file)
-                deleted_files_count += 1
-            except Exception:
-                pass
+    for storage_path in [settings.UPLOAD_STORAGE_PATH, settings.OUTPUT_STORAGE_PATH]:
+        storage_dir = Path(storage_path)
+        if storage_dir.exists():
+            for enc_file in storage_dir.glob("*.enc"):
+                try:
+                    os.remove(enc_file)
+                    deleted_files_count += 1
+                except Exception:
+                    pass
 
     # 3. Purge Qdrant Vector Collection
     qdrant = get_qdrant_service()

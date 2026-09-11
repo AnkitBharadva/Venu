@@ -148,8 +148,8 @@ export const KnowledgeGraphVisualizer: React.FC<KnowledgeGraphVisualizerProps> =
       const conf = TYPE_CONFIG[n.type] || TYPE_CONFIG.Default;
 
       // Position in clusters or circles
-      let initialX = width / 2 + (Math.random() - 0.5) * 300;
-      let initialY = canvasHeight / 2 + (Math.random() - 0.5) * 260;
+      let initialX = width / 2 + (Math.random() - 0.5) * 260;
+      let initialY = canvasHeight / 2 + (Math.random() - 0.5) * 200;
 
       if (n.type === 'Document') {
         initialX = width / 2;
@@ -157,7 +157,18 @@ export const KnowledgeGraphVisualizer: React.FC<KnowledgeGraphVisualizerProps> =
       } else if (n.type === 'Topic') {
         const angle = (idx / Math.max(1, counts.topic)) * Math.PI * 2;
         initialX = width / 2 + Math.cos(angle) * 140;
-        initialY = canvasHeight / 2 + Math.sin(angle) * 120;
+        initialY = canvasHeight / 2 + Math.sin(angle) * 110;
+      } else if (n.type === 'Chunk') {
+        const chunkIdx = n.properties?.chunk_index ?? idx;
+        const totalChunks = Math.max(1, counts.chunk);
+        const spreadX = ((chunkIdx + 0.5) - totalChunks / 2) * 80;
+        initialX = width / 2 + spreadX;
+        initialY = canvasHeight / 2 + 130;
+      } else if (n.type === 'Entity') {
+        const entIdx = idx % Math.max(1, counts.entity);
+        const angle = (entIdx / Math.max(1, counts.entity)) * Math.PI * 2;
+        initialX = width / 2 + Math.cos(angle) * 190;
+        initialY = canvasHeight / 2 + Math.sin(angle) * 150;
       }
 
       nodeMap.set(n.id, {
@@ -228,35 +239,51 @@ export const KnowledgeGraphVisualizer: React.FC<KnowledgeGraphVisualizerProps> =
     }
 
     // 1. Draw Edges
+    // Level-of-Detail (LOD): If an entity is active, only draw labels for directly incident edges
+    // If no entity is active, draw labels only when zoomed in (k >= 1.25) or sparse graph (<= 35 edges)
+    const shouldDrawAnyEdgeLabel = showEdgeLabels && (!activeId ? (k >= 1.25 || edgesArr.length <= 35) : true);
+
     edgesArr.forEach((edge) => {
+      const isIncident = activeId ? (edge.source.id === activeId || edge.target.id === activeId) : false;
       const isConnected =
         !activeId ||
-        edge.source.id === activeId ||
-        edge.target.id === activeId ||
+        isIncident ||
         (highlightedNeighborIds.has(edge.source.id) && highlightedNeighborIds.has(edge.target.id));
 
       const isInterChunk = edge.source.type === 'Chunk' && edge.target.type === 'Chunk';
 
-      ctx.save();
+      // Fast pass for dimmed edges when an active node exists: simple line, skip arrowheads and text
+      if (activeId && !isConnected) {
+        ctx.globalAlpha = 0.08;
+        ctx.strokeStyle = '#D8D5CE';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.moveTo(edge.source.x, edge.source.y);
+        ctx.lineTo(edge.target.x, edge.target.y);
+        ctx.stroke();
+        return;
+      }
+
       ctx.globalAlpha = activeId ? (isConnected ? 0.95 : 0.12) : 0.7;
 
       if (isInterChunk) {
         if (edge.relation === 'NEXT_CHUNK') {
-          ctx.strokeStyle = isConnected && activeId ? '#2563EB' : '#475569';
-          ctx.lineWidth = isConnected && activeId ? 2.6 : 1.8;
+          ctx.strokeStyle = isIncident ? '#2563EB' : '#475569';
+          ctx.lineWidth = isIncident ? 2.6 : 1.8;
           ctx.setLineDash([4, 3]);
         } else if (edge.relation === 'SHARES_ENTITY') {
-          ctx.strokeStyle = isConnected && activeId ? '#059669' : '#15803D';
-          ctx.lineWidth = isConnected && activeId ? 2.6 : 1.8;
+          ctx.strokeStyle = isIncident ? '#059669' : '#15803D';
+          ctx.lineWidth = isIncident ? 2.6 : 1.8;
           ctx.setLineDash([]);
         } else {
-          ctx.strokeStyle = isConnected && activeId ? '#D97706' : '#B45309';
-          ctx.lineWidth = isConnected && activeId ? 2.6 : 1.8;
+          ctx.strokeStyle = isIncident ? '#D97706' : '#B45309';
+          ctx.lineWidth = isIncident ? 2.6 : 1.8;
           ctx.setLineDash([]);
         }
       } else {
-        ctx.strokeStyle = isConnected && activeId ? '#E8A36A' : '#B8B5AD';
-        ctx.lineWidth = isConnected && activeId ? 2.2 : 1.2;
+        ctx.strokeStyle = isIncident ? '#E8A36A' : '#B8B5AD';
+        ctx.lineWidth = isIncident ? 2.2 : 1.2;
         ctx.setLineDash([]);
       }
 
@@ -265,7 +292,7 @@ export const KnowledgeGraphVisualizer: React.FC<KnowledgeGraphVisualizerProps> =
       ctx.moveTo(edge.source.x, edge.source.y);
       ctx.lineTo(edge.target.x, edge.target.y);
       ctx.stroke();
-      ctx.setLineDash([]); // reset dash for arrowhead and badges
+      ctx.setLineDash([]); // reset dash
 
       // Draw Arrowhead pointing to target
       const angle = Math.atan2(edge.target.y - edge.source.y, edge.target.x - edge.source.x);
@@ -279,7 +306,7 @@ export const KnowledgeGraphVisualizer: React.FC<KnowledgeGraphVisualizerProps> =
           : edge.relation === 'SHARES_ENTITY'
           ? '#059669'
           : '#D97706'
-        : isConnected && activeId
+        : isIncident
         ? '#E8A36A'
         : '#99958D';
 
@@ -297,7 +324,8 @@ export const KnowledgeGraphVisualizer: React.FC<KnowledgeGraphVisualizerProps> =
       ctx.fill();
 
       // Draw edge relationship label if enabled and connected
-      if (showEdgeLabels && (isConnected || !activeId) && k >= 0.7) {
+      const shouldDrawThisLabel = shouldDrawAnyEdgeLabel && (!activeId || isIncident);
+      if (shouldDrawThisLabel) {
         const midX = (edge.source.x + edge.target.x) / 2;
         const midY = (edge.source.y + edge.target.y) / 2;
 
@@ -334,7 +362,7 @@ export const KnowledgeGraphVisualizer: React.FC<KnowledgeGraphVisualizerProps> =
             : edge.relation === 'SHARES_ENTITY'
             ? '#10B981'
             : '#F59E0B'
-          : isConnected && activeId
+          : isIncident
           ? '#E8A36A'
           : '#D8D5CE';
         ctx.lineWidth = 0.8;
@@ -351,15 +379,13 @@ export const KnowledgeGraphVisualizer: React.FC<KnowledgeGraphVisualizerProps> =
             : edge.relation === 'SHARES_ENTITY'
             ? '#065F46'
             : '#92400E'
-          : isConnected && activeId
+          : isIncident
           ? '#C27129'
           : '#6F6D68';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(labelText, midX, midY + 0.5);
       }
-
-      ctx.restore();
     });
 
     // 2. Draw Nodes
@@ -371,7 +397,6 @@ export const KnowledgeGraphVisualizer: React.FC<KnowledgeGraphVisualizerProps> =
         searchFilter.trim() !== '' &&
         node.label.toLowerCase().includes(searchFilter.trim().toLowerCase());
 
-      ctx.save();
       ctx.globalAlpha = isHighlighted ? 1 : 0.18;
 
       // Outer focus glow/ring for selected or search match
@@ -416,9 +441,11 @@ export const KnowledgeGraphVisualizer: React.FC<KnowledgeGraphVisualizerProps> =
       ctx.fillText(symbol, node.x, node.y);
 
       // Node Label Text Below
-      const labelAlpha = isHighlighted ? (k < 0.65 && !isSelected ? 0 : 1) : 0;
-      if (labelAlpha > 0) {
-        ctx.globalAlpha = labelAlpha;
+      const isKeyNode = node.type === 'Document' || node.type === 'Topic';
+      const showPill = isHighlighted && (isSelected || isHovered || isSearchMatch || isKeyNode || k >= 0.72 || nodesArr.length <= 40);
+
+      if (showPill) {
+        ctx.globalAlpha = isHighlighted ? 1 : 0.2;
         ctx.font = isSelected
           ? 'bold 11px sans-serif'
           : '10px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
@@ -441,13 +468,22 @@ export const KnowledgeGraphVisualizer: React.FC<KnowledgeGraphVisualizerProps> =
 
         const pad = 3;
         ctx.beginPath();
-        ctx.roundRect(
-          node.x - textW / 2 - pad,
-          badgeY - 7,
-          textW + pad * 2,
-          14,
-          3
-        );
+        if (typeof ctx.roundRect === 'function') {
+          ctx.roundRect(
+            node.x - textW / 2 - pad,
+            badgeY - 7,
+            textW + pad * 2,
+            14,
+            3
+          );
+        } else {
+          ctx.rect(
+            node.x - textW / 2 - pad,
+            badgeY - 7,
+            textW + pad * 2,
+            14
+          );
+        }
         ctx.fill();
         ctx.stroke();
 
@@ -456,18 +492,16 @@ export const KnowledgeGraphVisualizer: React.FC<KnowledgeGraphVisualizerProps> =
         ctx.textBaseline = 'middle';
         ctx.fillText(displayLabel, node.x, badgeY);
       }
-
-      ctx.restore();
     });
 
     ctx.restore();
   }, [selectedNodeId, searchFilter, showEdgeLabels]);
 
   // Restart physics loop with full kinetic energy; settles and automatically pauses
-  const restartSimulation = useCallback(() => {
-    let energy = 100;
+  const restartSimulation = useCallback((initialEnergy = 70, maxSimulationTicks = 75) => {
+    let energy = initialEnergy;
     let ticks = 0;
-    const maxTicks = 200; // Stabilizes within 200 frames to save 100% CPU
+    const maxTicks = maxSimulationTicks;
 
     isSimulatingRef.current = true;
     if (animFrameRef.current) {
@@ -502,7 +536,8 @@ export const KnowledgeGraphVisualizer: React.FC<KnowledgeGraphVisualizerProps> =
           node.vy += dy * 0.0006;
         });
 
-        // 2. Coulomb electrostatic repulsion between nodes
+        // 2. Coulomb electrostatic repulsion between nodes (with 250px cutoff)
+        const maxRepulsionDistSq = 62500;
         for (let i = 0; i < nodesArr.length; i++) {
           const a = nodesArr[i];
           for (let j = i + 1; j < nodesArr.length; j++) {
@@ -510,8 +545,9 @@ export const KnowledgeGraphVisualizer: React.FC<KnowledgeGraphVisualizerProps> =
             const dx = b.x - a.x;
             const dy = b.y - a.y;
             const distSq = dx * dx + dy * dy + 100;
+            if (distSq > maxRepulsionDistSq) continue;
             const dist = Math.sqrt(distSq);
-            const force = 3200 / distSq;
+            const force = 3000 / distSq;
             const fx = (dx / dist) * force;
             const fy = (dy / dist) * force;
 
@@ -538,10 +574,10 @@ export const KnowledgeGraphVisualizer: React.FC<KnowledgeGraphVisualizerProps> =
           let targetDist = 95;
           if (edge.relation === 'HAS_CHUNK') targetDist = 120;
           if (edge.relation === 'HAS_TOPIC') targetDist = 75;
-          if (edge.relation === 'MENTIONS') targetDist = 90;
+          if (edge.relation === 'MENTIONS') targetDist = 85;
 
           const diff = dist - targetDist;
-          const force = diff * 0.035;
+          const force = Math.max(-6, Math.min(6, diff * 0.035));
           const fx = (dx / dist) * force;
           const fy = (dy / dist) * force;
 
@@ -550,18 +586,18 @@ export const KnowledgeGraphVisualizer: React.FC<KnowledgeGraphVisualizerProps> =
             a.vy -= fy;
           }
           if (!b.pinned) {
-            b.vx -= fx;
-            b.vy -= fy;
+            b.vx += fx;
+            b.vy += fy;
           }
         });
 
-        // 4. Integrate velocities with damping
+        // 4. Integrate velocities with fast damping
         let totalVelocity = 0;
         nodesArr.forEach((node) => {
           if (node === draggedNodeRef.current) return;
           if (!node.pinned) {
-            node.vx *= 0.85;
-            node.vy *= 0.85;
+            node.vx *= 0.78;
+            node.vy *= 0.78;
             node.x += node.vx;
             node.y += node.vy;
             totalVelocity += Math.abs(node.vx) + Math.abs(node.vy);
@@ -659,7 +695,7 @@ export const KnowledgeGraphVisualizer: React.FC<KnowledgeGraphVisualizerProps> =
       }
       setTwoHopData(null); // reset 2-hop panel for newly selected node
       if (!isSimulatingRef.current) {
-        restartSimulation();
+        restartSimulation(35, 45);
       }
     } else {
       isPanningRef.current = true;
@@ -685,7 +721,9 @@ export const KnowledgeGraphVisualizer: React.FC<KnowledgeGraphVisualizerProps> =
       draggedNodeRef.current.vx = 0;
       draggedNodeRef.current.vy = 0;
       if (!isSimulatingRef.current) {
-        restartSimulation();
+        restartSimulation(35, 45);
+      } else {
+        drawCanvas();
       }
     } else if (isPanningRef.current) {
       // Pan canvas without physics overhead

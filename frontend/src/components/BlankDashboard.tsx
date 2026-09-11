@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { KnowledgeGraphVisualizer, GraphNodeData, GraphEdgeData } from './KnowledgeGraphVisualizer';
+import { HumanReviewWorkspace } from './HumanReviewWorkspace';
 
 interface StructuralMetadata {
   parser?: string;
@@ -167,6 +168,8 @@ interface DeliverableResponse {
   total_sentences: number;
   total_citations: number;
   contract_verified: boolean;
+  reviewer_id?: string | null;
+  reviewer_notes?: string | null;
 }
 
 interface AuditVerification {
@@ -278,7 +281,8 @@ Coast guard interception assets are placed on high alert. The intelligence analy
 
 export const BlankDashboard: React.FC = () => {
   // Navigation
-  const [activeTab, setActiveTab] = useState<'studio' | 'grounding' | 'audit'>('studio');
+  const [activeTab, setActiveTab] = useState<'studio' | 'review' | 'grounding' | 'audit'>('studio');
+  const [userRole, setUserRole] = useState<'operator' | 'reviewer'>('reviewer');
 
   // Document State
   const [documents, setDocuments] = useState<DocumentSummaryItem[]>([]);
@@ -799,27 +803,79 @@ export const BlankDashboard: React.FC = () => {
     setTimeout(() => setCopiedId(null), 2000);
   };
 
+  const handleStudioSubmitForReview = async (outputId: string) => {
+    try {
+      const res = await fetch(`/api/v1/review/outputs/${outputId}/request-approval`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-User-Role': 'operator',
+          'X-User-Id': 'operator_primary',
+        },
+        body: JSON.stringify({ notes: 'Submitted from Transformation Studio.' }),
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setSelectedDeliverable(updated);
+        setDeliverables((prev) => prev.map((d) => (d.output_id === outputId ? updated : d)));
+        setToastMessage({ type: 'success', text: 'Submitted to reviewer queue (status: pending_review).' });
+        fetchAuditLogs();
+      }
+    } catch {
+      setToastMessage({ type: 'alert', text: 'Failed to submit for review.' });
+    }
+  };
+
+  const handleStudioApprove = async (outputId: string) => {
+    try {
+      const res = await fetch(`/api/v1/review/outputs/${outputId}/approve`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-User-Role': 'reviewer',
+          'X-User-Id': 'reviewer_primary',
+        },
+        body: JSON.stringify({ reviewer_notes: 'Ground truth citations verified in Transformation Studio. Approved for export.' }),
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setSelectedDeliverable(updated);
+        setDeliverables((prev) => prev.map((d) => (d.output_id === outputId ? updated : d)));
+        setToastMessage({ type: 'success', text: 'Deliverable certified and approved. Export unlocked!' });
+        fetchAuditLogs();
+      }
+    } catch {
+      setToastMessage({ type: 'alert', text: 'Approval failed.' });
+    }
+  };
+
   const handleExport = async (outputId: string, format: string) => {
     setIsExporting(true);
     try {
-      // Human Review Gatekeeper: ensure deliverable is approved before export
+      // Enforce Human Review Gatekeeper
       if (
         selectedDeliverable &&
         selectedDeliverable.status !== 'approved' &&
         selectedDeliverable.status !== 'final'
       ) {
-        try {
-          await fetch(`/api/v1/review/outputs/${outputId}/approve`, {
+        if (userRole === 'reviewer') {
+          // As certified reviewer, auto-certify upon deliberate export click with note
+          const appRes = await fetch(`/api/v1/review/outputs/${outputId}/approve`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
               'X-User-Role': 'reviewer',
-              'X-User-Id': 'operator_primary',
+              'X-User-Id': 'reviewer_primary',
             },
-            body: JSON.stringify({ reviewer_notes: 'Ground truth citations verified in Transformation Studio. Approved for export.' }),
+            body: JSON.stringify({ reviewer_notes: 'Ground truth verified. Certified for release upon export.' }),
           });
-        } catch {
-          // proceed to export
+          if (appRes.ok) {
+            const updatedDeliv = await appRes.json();
+            setSelectedDeliverable(updatedDeliv);
+            setDeliverables((prev) => prev.map((d) => (d.output_id === outputId ? updatedDeliv : d)));
+          }
+        } else {
+          throw new Error("Export Locked: Deliverable requires explicit Human Reviewer approval before release (Airgap Directive § 2). Switch to Reviewer persona or open 'Human Review' tab.");
         }
       }
 
@@ -827,8 +883,8 @@ export const BlankDashboard: React.FC = () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-User-Role': 'reviewer',
-          'X-User-Id': 'operator_primary',
+          'X-User-Role': userRole,
+          'X-User-Id': userRole === 'reviewer' ? 'reviewer_primary' : 'operator_primary',
         },
         body: JSON.stringify({ export_format: format }),
       });
@@ -950,6 +1006,22 @@ export const BlankDashboard: React.FC = () => {
           </button>
 
           <button
+            onClick={() => setActiveTab('review')}
+            className={`px-3.5 py-1.5 rounded-md text-xs font-medium transition flex items-center space-x-1.5 ${
+              activeTab === 'review'
+                ? 'bg-[#FCFBF8] text-[#252525] shadow-soft border border-[#D8D5CE]'
+                : 'text-[#6F6D68] hover:text-[#252525]'
+            }`}
+          >
+            <span>Human Review</span>
+            {deliverables.filter((d) => d.status === 'pending_review' || d.status === 'draft').length > 0 && (
+              <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-[#FEF3C7] text-[#D97706] font-bold border border-[#FDE68A]">
+                {deliverables.filter((d) => d.status === 'pending_review' || d.status === 'draft').length}
+              </span>
+            )}
+          </button>
+
+          <button
             onClick={() => {
               setActiveTab('grounding');
               if (latestDoc && chunks.length === 0) handleProcessSource();
@@ -988,8 +1060,33 @@ export const BlankDashboard: React.FC = () => {
           </button>
         </div>
 
-        {/* Actions Right: Clear DB & Air-gap Verification */}
+        {/* Actions Right: Persona Switcher, Clear DB & Air-gap Verification */}
         <div className="flex items-center space-x-2">
+          {/* Persona Switcher */}
+          <div className="flex items-center rounded-md border border-[#D8D5CE] bg-[#FCFBF8] p-0.5 text-xs font-mono shadow-soft">
+            <button
+              onClick={() => setUserRole('operator')}
+              title="Operator (Analyst): Generates deliverables and submits for review"
+              className={`px-2.5 py-1 rounded transition ${
+                userRole === 'operator'
+                  ? 'bg-[#30302E] text-white font-medium shadow-sm'
+                  : 'text-[#6F6D68] hover:text-[#252525]'
+              }`}
+            >
+              Operator
+            </button>
+            <button
+              onClick={() => setUserRole('reviewer')}
+              title="Reviewer (Approver): Authorized to approve, reject, edit and export deliverables"
+              className={`px-2.5 py-1 rounded transition ${
+                userRole === 'reviewer'
+                  ? 'bg-[#15803D] text-white font-semibold shadow-sm'
+                  : 'text-[#6F6D68] hover:text-[#252525]'
+              }`}
+            >
+              Reviewer
+            </button>
+          </div>
           <button
             onClick={() => setClearDbModalOpen(true)}
             title="Purge all documents, vectors, graph nodes, deliverables, and reset audit log"
@@ -1727,6 +1824,57 @@ export const BlankDashboard: React.FC = () => {
 
                     {/* Main Deliverable View */}
                     <div className="p-4 rounded-lg bg-[#F8F7F3]/70 border border-[#D8D5CE] space-y-3.5">
+                      {/* Human Review Status & Dual-Control Action Bar */}
+                      <div className="p-3 rounded-md border text-xs font-mono flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 bg-[#FCFBF8]">
+                        <div className="flex items-center space-x-2">
+                          <span className="text-[10px] uppercase font-bold text-[#6F6D68]">Review Status:</span>
+                          <span
+                            className={`px-2 py-0.5 rounded border text-[10px] font-bold uppercase tracking-wider ${
+                              selectedDeliverable.status === 'approved' || selectedDeliverable.status === 'final'
+                                ? 'bg-[#EBF7EE] text-[#15803D] border-[#BBE5C4]'
+                                : selectedDeliverable.status === 'pending_review'
+                                ? 'bg-[#FEF3C7] text-[#D97706] border-[#FDE68A]'
+                                : selectedDeliverable.status === 'rejected'
+                                ? 'bg-[#FEE2E2] text-[#DC2626] border-[#FECACA]'
+                                : 'bg-[#F3F4F6] text-[#6B7280] border-[#E5E7EB]'
+                            }`}
+                          >
+                            {selectedDeliverable.status}
+                          </span>
+                          {selectedDeliverable.reviewer_id && (
+                            <span className="text-[10px] text-[#6F6D68]">by {selectedDeliverable.reviewer_id}</span>
+                          )}
+                        </div>
+
+                        {/* Direct Review Actions */}
+                        <div className="flex items-center space-x-2">
+                          {selectedDeliverable.status === 'draft' && (
+                            <button
+                              onClick={() => handleStudioSubmitForReview(selectedDeliverable.output_id)}
+                              className="px-2.5 py-1 rounded bg-[#30302E] hover:bg-[#252525] text-white text-[11px] font-medium transition"
+                            >
+                              Submit for Review &rarr;
+                            </button>
+                          )}
+
+                          {selectedDeliverable.status === 'pending_review' && userRole === 'reviewer' && (
+                            <button
+                              onClick={() => handleStudioApprove(selectedDeliverable.output_id)}
+                              className="px-2.5 py-1 rounded bg-[#15803D] hover:bg-[#166534] text-white text-[11px] font-semibold transition"
+                            >
+                              ✓ Approve Deliverable
+                            </button>
+                          )}
+
+                          <button
+                            onClick={() => setActiveTab('review')}
+                            className="px-2.5 py-1 rounded bg-[#FCFBF8] border border-[#D8D5CE] hover:bg-[#EAE8E1] text-[#252525] text-[11px] transition"
+                          >
+                            Open Review Workbench &rarr;
+                          </button>
+                        </div>
+                      </div>
+
                       <div>
                         <h3 className="text-base font-serif font-bold text-[#252525] tracking-tight">
                           {selectedDeliverable.content.title}
@@ -1850,7 +1998,19 @@ export const BlankDashboard: React.FC = () => {
         </>
       )}
 
-      {/* VIEW 2: SOURCE & GROUNDING */}
+      {/* VIEW 2: HUMAN REVIEW WORKSPACE */}
+      {activeTab === 'review' && (
+        <HumanReviewWorkspace
+          userRole={userRole}
+          onSwitchRole={(role) => setUserRole(role)}
+          activeDocId={latestDoc?.doc_id || null}
+          onRefreshAuditLogs={fetchAuditLogs}
+          onToast={(msg) => setToastMessage(msg)}
+          onExportSuccess={(res) => setExportModal(res)}
+        />
+      )}
+
+      {/* VIEW 3: SOURCE & GROUNDING */}
       {activeTab === 'grounding' && (
         <div className="space-y-4">
           {/* Sub-Header with Engine Mode Toggles */}

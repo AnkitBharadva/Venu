@@ -30,13 +30,19 @@ def get_whisper_model() -> Any:
             except Exception:
                 pass
 
-    # Find cached model snapshot or use model name
-    cache_tiny = os.path.expanduser(r"~/.cache/huggingface/hub/models--Systran--faster-whisper-tiny/snapshots")
-    model_source = "tiny"
-    if os.path.exists(cache_tiny):
-        snaps = os.listdir(cache_tiny)
-        if snaps:
-            model_source = os.path.join(cache_tiny, snaps[0])
+    # Priority order: small.en -> base.en -> tiny
+    model_source = "small.en"
+    for candidate in [
+        "models--Systran--faster-whisper-small.en",
+        "models--Systran--faster-whisper-base.en",
+        "models--Systran--faster-whisper-tiny",
+    ]:
+        candidate_dir = os.path.expanduser(rf"~/.cache/huggingface/hub/{candidate}/snapshots")
+        if os.path.exists(candidate_dir):
+            snaps = os.listdir(candidate_dir)
+            if snaps:
+                model_source = os.path.join(candidate_dir, snaps[0])
+                break
 
     try:
         from faster_whisper import WhisperModel
@@ -162,6 +168,21 @@ class WhisperParser(BaseParser):
             confidences = [0.85]
 
         combined_text = " ".join(transcript_lines).strip()
+
+        # Compute exact character offsets for each timestamp segment
+        current_offset = 0
+        for ts in timestamps:
+            seg_txt = ts.get("text", "")
+            found_idx = combined_text.find(seg_txt, current_offset)
+            if found_idx >= 0:
+                ts["char_start"] = found_idx
+                ts["char_end"] = found_idx + len(seg_txt)
+                current_offset = ts["char_end"]
+            else:
+                ts["char_start"] = current_offset
+                ts["char_end"] = current_offset + len(seg_txt)
+                current_offset += len(seg_txt) + 1
+
         avg_confidence = sum(confidences) / len(confidences) if confidences else 0.90
 
         # Confidence checks and operator warnings (Task 5)

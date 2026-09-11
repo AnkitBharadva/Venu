@@ -41,9 +41,9 @@ class SemanticChunker:
 
     def __init__(
         self,
-        min_chunk_chars: int = 120,
-        target_chunk_chars: int = 500,
-        max_chunk_chars: int = 900,
+        min_chunk_chars: int = 80,
+        target_chunk_chars: int = 250,
+        max_chunk_chars: int = 400,
     ) -> None:
         self.min_chunk_chars = min_chunk_chars
         self.target_chunk_chars = target_chunk_chars
@@ -272,7 +272,15 @@ class SemanticChunker:
             abs_e = span_start + len(span_slice)
             s_trim, e_trim = self._trim_span_offsets(text, abs_s, abs_e)
             if s_trim < e_trim:
-                sub_spans.append((s_trim, e_trim))
+                # Merge small trailing fragments (< min_chunk_chars) into preceding chunk
+                if sub_spans and (e_trim - s_trim) < self.min_chunk_chars:
+                    prev_s, prev_e = sub_spans[-1]
+                    if (e_trim - prev_s) <= (self.max_chunk_chars + 120):
+                        sub_spans[-1] = (prev_s, e_trim)
+                    else:
+                        sub_spans.append((s_trim, e_trim))
+                else:
+                    sub_spans.append((s_trim, e_trim))
 
         # Fallback if no clean sentence breaks found: chunk by word boundaries
         if not sub_spans:
