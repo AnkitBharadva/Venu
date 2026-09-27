@@ -166,18 +166,43 @@ docker compose exec backend curl -I --connect-timeout 2 https://google.com
 ├── README.md                      # Architecture and setup guide
 ├── backend/                       # FastAPI Core Orchestrator
 │   ├── app/
-│   │   ├── api/                   # Health and monitoring routers
-│   │   │   └── health.py          # /health, /health/live, /health/ready, /health/airgap
-│   │   ├── core/                  # Settings, Postgres, Qdrant & FalkorDB clients
+│   │   ├── api/                   # API routers
+│   │   │   ├── health.py          # /health, /health/live, /health/ready, /health/airgap
+│   │   │   ├── ingestion.py       # Multi-modal file upload & AES-256 storage
+│   │   │   ├── understanding.py   # Document understanding, entities, & search
+│   │   │   ├── grounding.py       # Hybrid retrieval & /trace provenance
+│   │   │   ├── adapters.py        # Multi-format deliverable generation
+│   │   │   ├── review.py          # Dual-control review, diffs & export gatekeeper
+│   │   │   └── audit.py           # Linear SHA-256 hash chain verification & logs
+│   │   ├── core/                  # Settings, Postgres, Qdrant, FalkorDB & RBAC
 │   │   │   ├── config.py
 │   │   │   ├── database.py
 │   │   │   ├── qdrant_client.py
-│   │   │   └── falkordb_client.py
+│   │   │   ├── falkordb_client.py
+│   │   │   ├── rbac.py
+│   │   │   └── security.py
 │   │   ├── models/                # SQLAlchemy ORM schemas
-│   │   │   └── audit_log.py       # Source documents, audit log, deliverables
+│   │   │   └── audit_log.py       # Source documents, audit log, deliverables, diff history
+│   │   ├── schemas/               # Pydantic data contracts
+│   │   │   ├── ingestion.py
+│   │   │   ├── understanding.py
+│   │   │   ├── grounding.py
+│   │   │   ├── adapters.py
+│   │   │   └── review.py
+│   │   ├── services/              # Business logic & pipeline stages
+│   │   │   ├── file_router.py     # MIME & extension routing
+│   │   │   ├── parsers/           # Docling, Qwen-VL/PaddleOCR, Whisper, Text
+│   │   │   ├── chunking/          # Semantic paragraph-aware chunker
+│   │   │   ├── embeddings/        # Local dense vector embedder
+│   │   │   ├── extraction/        # Entity, topic & sensitivity extractor
+│   │   │   ├── storage/           # Qdrant & FalkorDB graph services
+│   │   │   ├── grounding/         # Hybrid retrieval, contract & trace service
+│   │   │   ├── adapters/          # 8 built-in adapters + dynamic config engine
+│   │   │   ├── llm/               # Local Ollama service & vision extraction
+│   │   │   ├── review_service.py  # Human-in-the-loop review, diffs & gatekeeper
+│   │   │   └── security/          # AES-256-GCM at-rest encryption
 │   │   └── main.py                # FastAPI lifecycle, CORS, router mounts
-│   ├── tests/                     # Pytest test suite
-│   │   └── test_health.py
+│   ├── tests/                     # Comprehensive test suite (Phases 0-8)
 │   ├── Dockerfile
 │   ├── requirements.txt
 │   ├── pyproject.toml
@@ -186,8 +211,10 @@ docker compose exec backend curl -I --connect-timeout 2 https://google.com
 ├── frontend/                      # React + TypeScript + Tailwind Operator UI
 │   ├── src/
 │   │   ├── components/
-│   │   │   ├── BlankDashboard.tsx # Operator dashboard skeleton (Phase 0)
-│   │   │   └── ServiceStatus.tsx  # Real-time enclave dependency health card
+│   │   │   ├── BlankDashboard.tsx           # Operator cockpit & Studio / Audit view
+│   │   │   ├── HumanReviewWorkspace.tsx     # Dedicated Human-in-the-Loop review studio
+│   │   │   ├── KnowledgeGraphVisualizer.tsx # 60 FPS interactive force-directed graph
+│   │   │   └── ServiceStatus.tsx            # Real-time enclave dependency health card
 │   │   ├── App.tsx
 │   │   ├── main.tsx
 │   │   └── index.css
@@ -214,9 +241,14 @@ docker compose exec backend curl -I --connect-timeout 2 https://google.com
 │   └── falkordb/
 │       └── README.md              # FalkorDB graph persistence guide
 └── scripts/
-    ├── verify_phase0.py           # Self-contained Phase 0 verification script
-    ├── verify_phase1.py           # Self-contained Phase 1 ingestion verification script
-    └── verify_phase2.py           # Self-contained Phase 2 understanding & chunking verification
+    ├── verify_phase0.py           # Phase 0 baseline verification
+    ├── verify_phase1.py           # Phase 1 ingestion verification
+    ├── verify_phase2.py           # Phase 2 understanding & chunking verification
+    ├── verify_phase3.py           # Phase 3 hybrid grounding verification
+    ├── verify_phase4.py           # Phase 4 multi-format generation verification
+    ├── verify_phase5_security.py  # Phase 5 security & air-gap verification
+    ├── verify_phase6_review.py    # Phase 6 human review verification
+    └── verify_phase8_e2e_benchmark.py # Phase 8 end-to-end matrix benchmark
 ```
 
 ---
@@ -235,8 +267,8 @@ curl -X POST http://localhost:8000/api/v1/ingest/upload \
 |---|---|---|---|
 | **Plain & Markdown** | `.txt`, `.md`, `.csv`, `.json` | `TextParser` | Markdown headings, lines, word count |
 | **Structured Documents** | `.pdf`, `.docx`, `.pptx` | `DoclingParser` | Page bounds, headings, tables, slides, speaker notes |
-| **Images & Scans** | `.png`, `.jpg`, `.jpeg`, `.webp`, `.tiff` | `OCRParser` (PaddleOCR) | Text lines, coordinates, confidence scores |
-| **Audio & Video** | `.wav`, `.mp3`, `.m4a`, `.mp4`, `.mkv`, `.mov` | `WhisperParser` | Transcripts with second-accurate `timestamps` |
+| **Images & Scans** | `.png`, `.jpg`, `.jpeg`, `.webp`, `.tiff`, `.bmp` | `OCRParser` (Local Qwen-VL + PaddleOCR) | Text lines, coordinates, confidence scores, scene context |
+| **Audio & Video** | `.wav`, `.mp3`, `.m4a`, `.mp4`, `.mkv`, `.mov`, `.aac`, `.flac` | `WhisperParser` (Local Whisper ASR) | Transcripts with second-accurate `timestamps` |
 
 ### 2. Verify AES-256 At-Rest Encryption
 ```bash
@@ -382,7 +414,8 @@ curl -X POST http://localhost:8000/api/v1/generate \
       "advisory",
       "presentation",
       "video_package",
-      "infographic"
+      "infographic",
+      "technical_documentation"
     ],
     "query": "air-gapped defense architecture",
     "parameters": {
@@ -394,7 +427,7 @@ curl -X POST http://localhost:8000/api/v1/generate \
 ```
 Retrieves grounded context **once** via hybrid Qdrant + FalkorDB search, then executes all requested adapters concurrently. Every generated sentence is linked to verified source chunks and stored in `generated_outputs` with cryptographic audit logging.
 
-### 2. Built-in Generation Adapters (7 Formats)
+### 2. Built-in Generation Adapters (8 Formats)
 | Deliverable Type | Name | Category | Specifics & Key Features |
 |---|---|---|---|
 | `linkedin_post` | **LinkedIn Post** | Social | Hook + Body + CTA structure with hashtag suggestions. |
@@ -404,6 +437,7 @@ Retrieves grounded context **once** via hybrid Qdrant + FalkorDB search, then ex
 | `presentation` | **Presentation Deck** | Presentation | Structured slide deck JSON (titles, bullets, speaker notes) for interactive slide preview (non-binary). |
 | `video_package` | **Video Package** | Multimedia | Narration script, storyboard beats, scene descriptions, visual recommendations, timecoded SRT subtitles (explicitly non-rendered video). |
 | `infographic` | **Infographic Spec** | Visual | Content blocks, layout recommendations, visual hierarchy, key metrics (explicitly non-rendered image). |
+| `technical_documentation` | **Technical Documentation** | Engineering | Comprehensive markdown documentation (System Scope, Pipeline Architecture, API Reference, Cryptographic Security Envelope). |
 
 ### 3. Dynamic Format Extensibility via Configuration (`/generate/adapters/register`)
 Adding a new deliverable format requires **zero new code** — purely configuration:
@@ -565,9 +599,12 @@ Reviewers can edit any sentence directly in the review studio:
 ### 6. Phase 6 Verification Commands
 ```powershell
 # Run Phase 6 review & approval test suite (8/8 passing)
+### 6. Phase 6 Verification Commands
+```powershell
+# Run Phase 6 review & approval test suite (8/8 passing)
 conda run -n tri pytest backend/tests/test_phase6.py -v
 
-# Run complete backend test suite across all phases 0-6 (60/60 passing)
+# Run complete backend test suite across all phases 0-8 (65/65 passing)
 conda run -n tri pytest backend/tests/ -v
 
 # Run comprehensive end-to-end Human Review verification script
@@ -582,78 +619,59 @@ Phase 7 delivers a military/defence-grade, fully integrated Operator Dashboard (
 
 ```
   ┌─────────────────────────────────────────────────────────────────────────────────────────────────┐
-  │ 🟢 OFFLINE MODE: ACTIVE (Zero Outbound Egress) ── [🔍 Inspect Air-Gap Proof] ── Role: Operator/Bob│
+  │ 🟢 OFFLINE MODE: ACTIVE (Zero Outbound Egress) ── [🔍 Inspect Air-Gap Proof] ── Role: Operator/Reviewer│
   └────────────────────────────────────────────────┬────────────────────────────────────────────────┘
                                                    │
      ┌──────────────────┬──────────────────────────┼─────────────────────────┬──────────────────────┐
      ▼                  ▼                          ▼                         ▼                      ▼
-  [ 1. Ingestion ]   [ 2. Generation ]          [ 3. Human Review ]       [ 4. Audit Trail ]    [ 5. Security ]
-  - Drag-and-drop    - Multi-select (7 formats) - Inline sentence review  - Filterable table    - AES-256 Info
-  - Format detection - 6 transformation params  - Inline editing & diffs  - Search by actor/hash- Tamper demo
-  - Progress stages  - 4 quick preset buttons   - Formal approve/reject   - SHA-256 verification- Live socket
-  - 1-Click samples  - Hover/click /trace panel - Export final gatekeeper - JSON event inspector - Egress proof
+  [ 1. Studio Tab ]  [ 2. Human Review Tab ]    [ 3. Grounding Tab ]      [ 4. Audit Tab ]      [ 5. Air-Gap Modal ]
+  - File Ingestion   - Full Review Queue        - 60 FPS Knowledge Graph  - Filterable Table    - Live Socket Probe
+  - 8 Formats Select - Sentence-by-Sentence     - Level-of-Detail (LOD)   - SHA-256 Hash Chain  - Errno 10051 Drop
+  - 6 Transformation - Inline Sentence Editor   - Spanning-Chain Edges    - Tamper Verification - Zero Cloud Telemetry
+  - Inline /trace    - Git-Style Unified Diffs  - Qdrant Vector Search    - One-Click Hash Copy - Enclave Topology
+  - In-Place Review  - Reviewer Approve/Reject  - Entity Neighbor Inspect - JSON Event Viewer   - Docker Bridge
 ```
 
-### 1. Upload Screen & Multi-Modal Ingestion
-- **Drag-and-Drop Canvas & File-Type Detection**: Inspects file headers and extensions in real time to display format badges and routing engines (`PDF` via Docling, `DOCX` via Docling XML, `PPTX` via Slide Hierarchy, `PNG/JPG` via PaddleOCR, `WAV/MP3/MP4` via Whisper ASR, `TXT/MD` via Air-Gap Router).
-- **Multi-Stage Upload Progress Bar**: Dynamically reflects ingestion lifecycle:
-  - `Step 1/4 (25%)`: Reading file contents & computing raw SHA-256 checksum.
-  - `Step 2/4 (50%)`: Enclave AES-256-GCM encryption & secure disk storage.
-  - `Step 3/4 (75%)`: Semantic parsing & normalized `SourceDocument` schema creation.
-  - `Step 4/4 (100%)`: Chained cryptographic audit logging in PostgreSQL.
-- **1-Click Demo Intelligence Datasets**: Pre-configured sample intelligence files ready for one-click testing:
+### 1. Header Controls & Enclave Status
+- **Active Persona Switcher**: Instant toggle between **`Operator (Analyst)`** and **`Reviewer (Approver)`** enforcing the Two-Person Rule (§2 Compliance Mandate) across the UI.
+- **Persistent Air-Gap Banner**: Animated emerald pulse certifying `Offline Mode: Active (Zero Outbound Egress)`.
+- **Airgap Isolation Modal**:
+  - **Live Socket Egress Probe**: Triggers `/health/airgap` executing an active socket connection attempt to `1.1.1.1:53` (public DNS root), proving mathematical connection blockage (`Errno 10051 / 10060 - Network Unreachable`).
+  - **Dependency Audit**: Certifies zero external cloud telemetry in `backend/requirements.txt` and `frontend/package.json`.
+  - **Container Topology**: Explains Docker `internal: true` bridge network isolation.
+
+### 2. Transformation Studio Tab (`Studio`)
+- **Drag-and-Drop Ingestion Canvas**: Automatic format detection across PDF, DOCX, PPTX (Docling), Images/Scans (Qwen-VL / PaddleOCR), Audio/Video (Whisper ASR), and TXT/MD.
+- **Multi-Stage Progress Tracker**: Reading & SHA-256 (25%) &rarr; AES-256-GCM Encryption (50%) &rarr; Parser Normalization (75%) &rarr; Chained Audit Entry (100%).
+- **1-Click Intelligence Datasets**: Pre-configured sample intelligence files ready for evaluation:
   - *Defence Directive 2026 (Air-Gap Standard)*
   - *SCADA Cyber Incident Advisory*
   - *Maritime Reconnaissance Patrol Log*
+- **8 Deliverable Formats Selection**: Multi-select across LinkedIn Post, Twitter/X Thread, Executive Summary, Tactical Advisory, Presentation Deck, Video Package, Infographic Spec, and Technical Documentation.
+- **6-Parameter Transformation Panel & Presets**: `Audience`, `Tone`, `Language`, `Detail Level`, `Objective`, and `Style` with one-click presets (*DoD Directive*, *Executive Brief*, *Threat Alert*, *Public Advisory*).
+- **Tabbed Deliverable Results & Inline `/trace`**: Every generated claim sentence has an interactive citation badge. Hovering triggers the Grounding Provenance drawer showing verbatim source quote, character offsets, section heading, and verification badge.
+- **In-Place Review Banner**: Displays deliverable status (`draft`, `pending_review`, `approved`, `rejected`) with contextual action buttons and gatekeeper-locked export.
 
-### 2. Output-Type Selector & 6-Parameter Transformation Config
-- **Multi-Format Selection**: Multi-select checkboxes with `Select All (7 Formats)` and `Clear All` shortcuts across all 7 deliverable adapters:
-  1. *LinkedIn Post* (Social)
-  2. *Twitter/X Thread* (Social)
-  3. *Executive Summary* (Executive)
-  4. *Tactical Advisory* (Operational &mdash; Review Mandatory)
-  5. *Presentation Deck* (Slide Hierarchy)
-  6. *Video Package* (Script & Storyboard)
-  7. *Infographic Layout Spec* (Visual Data Layout)
-- **6-Parameter Transformation Panel**:
-  - `Audience`: Target audience persona (e.g. *Air Force & Cyber Command*, *C-Suite*, *Public*).
-  - `Tone`: Stylistic voice (e.g. *Authoritative & Objective*, *Urgent Operational Alert*).
-  - `Language`: ISO code specification (`en`, `es`, `fr`, `de`, `hi`).
-  - `Detail Level`: Output depth (`brief`, `standard`, `comprehensive`).
-  - `Objective`: Operational mission goal (e.g. *Threat Assessment & Operational Readiness*).
-  - `Style`: Professional standard (e.g. *DoD / Military Directive Standard (MIL-STD)*, *ICD 203*).
-- **Quick-Load Presets**: 1-click presets configuring all 6 parameters simultaneously:
-  - `DoD Directive`: Military directive standard for joint chiefs & command.
-  - `Executive Brief`: Condensed C-suite strategic decision briefing.
-  - `Threat Alert`: Urgent tactical alert for CERT & field operators.
-  - `Public Advisory`: AP news wire standard for public release.
+### 3. Dedicated Human Review Workspace Tab (`Human Review`)
+- **Dedicated Component**: [`frontend/src/components/HumanReviewWorkspace.tsx`](frontend/src/components/HumanReviewWorkspace.tsx)
+- **Review Queue**: Filterable by status (`All`, `Pending`, `Draft`, `Approved`, `Rejected`) with text search.
+- **Claim-by-Claim Citation Inspector**: Displays each sentence alongside its grounding citations, verbatim source quotes, and character spans.
+- **Inline Sentence Editor**: Edit claims directly in the browser with author tracking.
+- **Git-Style Unified Diff History**: Every sentence edit records a diff via `difflib.unified_diff`, displayed in the side-by-side Diff History drawer.
+- **Dual-Control Sign-Off**: Certified Reviewers provide formal notes and approve or reject deliverables, transitioning status and unlocking export.
 
-### 3. Generation Results View with Inline Citation Highlighting & `/trace`
-- **Tabbed Results View**: Tabbed container switching across generated deliverables with visual status pills (`Draft`, `Review Required`, `Final`).
-- **Inline Citation Highlighting & Interactive Hover**:
-  - Every generated claim sentence is highlighted with an interactive citation pill (`[Chunk #ID]`).
-  - Hovering or clicking any sentence triggers the **Grounding Provenance Panel** calling `/api/v1/grounding/trace/{output_id}/{sentence_index}`.
-  - Displays verbatim ground-truth source quote, character offsets (`char_offset_start/end`), source document heading, and verification badge (`100% Provenance Verified`).
-- **Direct Review Navigation**: Quick button `👉 Open in Review Studio` jumps directly into Human Review for that deliverable.
+### 4. Knowledge & Grounding Explorer Tab (`Knowledge & Grounding`)
+- **60 FPS Force-Directed Graph Engine**: [`frontend/src/components/KnowledgeGraphVisualizer.tsx`](frontend/src/components/KnowledgeGraphVisualizer.tsx) renders interactive document, chunk, entity, and topic nodes.
+- **Performance Optimizations**: Spanning-chain `SHARES_ENTITY` edges, Coulomb repulsion cutoff at 250px, clamped springs, fast damping (0.78), and dynamic Level-of-Detail (LOD) edge labeling.
+- **Hybrid Search**: Interactive Qdrant dense semantic vector search with similarity score meters and chunk offset inspector.
 
-### 4. Reviewer Studio View (Role-Gated RBAC)
-- Integrated Phase 6 dual-control studio accessible to `reviewer` / `approver` roles:
-  - Inline sentence accept/reject controls and bulk section-level approvals.
-  - Interactive sentence editor with live git-style unified diff computation.
-  - Deliverables start locked in `draft`; export gatekeeper strictly blocks unauthorized dissemination.
-  - Formal reviewer sign-off transitions deliverable to `final`, unlocking multi-format exports (`.md`, `.json`, `.html`, `.txt`).
-
-### 5. Filterable Cryptographic Audit Log Viewer
+### 5. Filterable Cryptographic Audit Log Viewer Tab (`Audit Ledger`)
 - Real-time tabular viewer querying `GET /api/v1/audit/logs`:
   - **Live Filters**: Filter by Action (`upload`, `generate`, `edit_sentence`, `approve`, `reject`, `export`, `tamper_detected`) and Actor (`operator_alice`, `reviewer_bob`).
   - **Free-Text Search**: Real-time substring search across IDs, actor names, target references, hashes, and payload details.
   - **Cryptographic Linkage Inspector**: Expandable drawer revealing `Current Hash`, `Previous Hash`, `Source SHA-256`, and formatted event JSON metadata.
   - **One-Click Hash Copy**: Copy full 64-character SHA-256 hashes to clipboard.
-  - **Live Audit Re-Verification**: Triggers `/api/v1/audit/verify` to recalculate and validate the entire chain on the fly.
-
-### 6. Persistent "Offline Mode: Active" Banner & Live Air-Gap Isolation Proof Modal
-- **Persistent Header Banner**: High-visibility status indicator with animated pulsing emerald beacon and `Offline Mode: Active (Zero Outbound Egress)`.
-- **Interactive Air-Gap Proof Modal**:
+  - **Live Audit Re-Verification**: Triggers `/api/v1/audit/verify-chain` to recalculate and validate the entire chain on the fly.
   - **Live Socket Egress Probe**: Sends a live non-blocking TCP socket connection to `1.1.1.1:53` (public DNS root) via `/health/airgap`. Confirms blocked egress (`Errno 10051 / 10060 - Network Unreachable`).
   - **Re-Probe Button**: Allows judges to re-trigger the socket test on demand.
   - **Container Network Topology Diagram**: Documents Docker `internal: true` bridge, disabled default gateway, and local container resolution.
@@ -742,10 +760,10 @@ cd frontend && npm run build
 - **[x] Phase 1: Ingestion Pipeline** — Multi-modal file router (Docling, PaddleOCR, Whisper), common SourceDocument schema, AES-256 encryption at rest, append-only tamper-evident audit logging, and low-confidence flags.
 - **[x] Phase 2: Understanding & Chunking Layer** — Semantic paragraph/section-aware chunking preserving exact character offsets, entity/topic/intent/sensitive terms extraction, 384-dim dense embeddings, Qdrant vector store indexing, FalkorDB openCypher knowledge graph upsert, and claim-to-chunk provenance.
 - **[x] Phase 3: Grounding & Retrieval Service** — `/retrieve` hybrid vector-graph endpoint, `/trace` sentence-level and full deliverable provenance endpoint, hard claim-citation contract gatekeeper (100% verified across 10 sentences and 3 output types), and React interactive hovercard inspector.
-- **[x] Phase 4: Output Generation Adapters** — Common adapter interface, 7 modular adapters (LinkedIn, Twitter Thread, Executive Summary, Advisory, Presentation, Video Package, Infographic), dynamic config registration, multi-select concurrent generation, safety-critical human review gatekeeper, and interactive slide/storyboard/metric previews.
+- **[x] Phase 4: Output Generation Adapters** — Common adapter interface, 8 modular adapters (LinkedIn, Twitter Thread, Executive Summary, Advisory, Presentation, Video Package, Infographic, Technical Documentation), dynamic config registration, multi-select concurrent generation, safety-critical human review gatekeeper, and interactive slide/storyboard/metric previews.
 - **[x] Phase 5: Security & Audit Layer** — RBAC dual-control model (`operator` vs `reviewer`/`approver`), append-only SHA-256 cryptographic hash chaining with live tamper detection, AES-256-GCM encryption at rest for generated outputs/exports, socket-level air-gap egress cut proof, and zero-telemetry dependency audit.
-- **[x] Phase 6: Human Review & Approval Workflow** — Default draft status, sentence/section accept & reject decisions, inline editor with git-style unified diffs, immutable `OutputEditHistory` table, formal reviewer approval state transition to `final`, export lock enforcement, and interactive diff modal.
-- **[x] Phase 7: Operator Dashboard** — Complete interactive React UI with 1-click sample intelligence docs, 6-parameter config panel, tabbed generation results with inline `/trace` grounding inspector, role-gated Review Studio, filterable cryptographic audit table, and live socket-level air-gap egress proof.
+- **[x] Phase 6: Human Review & Approval Workflow** — Default draft status, dedicated review workspace with queue filtering, sentence-level citation inspector, inline editor with git-style unified diffs, immutable `OutputEditHistory` table, formal reviewer approval state transition to `final`, export lock enforcement, and interactive diff modal.
+- **[x] Phase 7: Operator Dashboard** — Complete interactive React UI with 4 core workspaces (Studio, Human Review, Knowledge & Grounding, Audit Ledger), 60 FPS force-directed knowledge graph, 1-click sample intelligence docs, 6-parameter config panel, tabbed generation results with inline `/trace` grounding inspector, role-gated Review Workspace, filterable cryptographic audit table, and live socket-level air-gap egress proof.
 - **[x] Phase 8: Testing, Hardening & Deliverables Packaging** — Complete end-to-end matrix tests (21 combinations), latency benchmarks (<20ms), 65/65 passing backend tests, Architecture Document (`docs/ARCHITECTURE.md`), 2-minute Demo Script (`docs/DEMO_VIDEO_SCRIPT.md`), 5-slide Presentation Deck (`docs/PRESENTATION_SLIDES.md`), and tagged release (`v1.0.0-airgap-release`).
 
 

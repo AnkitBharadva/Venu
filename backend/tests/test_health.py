@@ -97,6 +97,6 @@ def test_settings_load():
     settings = get_settings()
     assert settings.PROJECT_NAME != ""
     assert settings.POSTGRES_PORT == 5432
-    assert settings.QDRANT_PORT == 6333
+    assert settings.QDRANT_PORT == 6335
     assert settings.FALKORDB_PORT == 6379
     assert isinstance(settings.ALLOWED_ORIGINS, list)

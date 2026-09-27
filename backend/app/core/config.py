@@ -42,8 +42,8 @@ class Settings(BaseSettings):
 
     # Qdrant
     QDRANT_HOST: str = "qdrant"
-    QDRANT_PORT: int = 6333
-    QDRANT_GRPC_PORT: int = 6334
+    QDRANT_PORT: int = 6335
+    QDRANT_GRPC_PORT: int = 6336
     QDRANT_COLLECTION_DEFAULT: str = "source_chunks"
     QDRANT_API_KEY: str | None = None
 
@@ -57,8 +57,8 @@ class Settings(BaseSettings):
     REASONING_MODEL_NAME: str = "Qwen3-8B"
     VISION_MODEL_NAME: str = "Qwen3-VL-4B"
     ASR_MODEL_NAME: str = "Whisper-medium.en"
-    EMBEDDING_MODEL_NAME: str = "BAAI/bge-small-en-v1.5"
-    EMBEDDING_DIMENSION: int = 384
+    EMBEDDING_MODEL_NAME: str = "bge-m3"
+    EMBEDDING_DIMENSION: int = 1024
 
     # Ollama Local LLM Runtime
     OLLAMA_ENABLED: bool = True
@@ -69,8 +69,8 @@ class Settings(BaseSettings):
 
     # Frontend / Network
     FRONTEND_PORT: int = 3000
-    BACKEND_PORT: int = 8000
-    REACT_APP_API_BASE_URL: str = "http://localhost:8000"
+    BACKEND_PORT: int = 8001
+    REACT_APP_API_BASE_URL: str = "http://localhost:8001"
 
     @field_validator("ALLOWED_ORIGINS", mode="before")
     @classmethod

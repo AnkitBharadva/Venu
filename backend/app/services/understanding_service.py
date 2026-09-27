@@ -54,7 +54,8 @@ async def process_document_understanding(
     metadata = doc.structural_metadata or {}
 
     # 2. Semantic Chunking with Exact Offset Preservation
-    chunker = SemanticChunker()
+    embedder = get_local_embedder()
+    chunker = SemanticChunker(embedder=embedder, use_semantic_breakpoints=True)
     extracted_chunks = chunker.chunk_text(raw_text, metadata)
 
     # Invariant verification: raw_text[start:end] == chunk.text
@@ -69,10 +70,20 @@ async def process_document_understanding(
     extractor = get_entity_extractor()
     extraction_res = extractor.extract(raw_text, extracted_chunks, metadata)
 
-    # 4. Dense Embeddings Generation (384 dimensions)
-    embedder = get_local_embedder()
-    chunk_texts = [c.text for c in extracted_chunks]
-    embeddings = embedder.embed_batch(chunk_texts) if chunk_texts else []
+    # 4. Hierarchical Context-Aware Dense Embeddings Generation (384 dimensions)
+    enriched_embed_inputs = []
+    for c in extracted_chunks:
+        prefix_parts = []
+        if c.heading:
+            prefix_parts.append(f"[Section: {c.heading}]")
+        if c.page_number:
+            prefix_parts.append(f"[Page: {c.page_number}]")
+        if prefix_parts:
+            enriched_embed_inputs.append(f"{' '.join(prefix_parts)} {c.text}")
+        else:
+            enriched_embed_inputs.append(c.text)
+
+    embeddings = embedder.embed_batch(enriched_embed_inputs) if enriched_embed_inputs else []
 
     # 5. Database Persistence (Relational Chunks & Understanding)
     # Clear existing chunks / understandings for idempotency

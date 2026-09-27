@@ -494,6 +494,124 @@ class FalkorDBService:
             direct_relations=direct_relations_list,
         )
 
+    async def query_multi_hop_context(
+        self,
+        entity_names: list[str],
+    ) -> dict[str, Any]:
+        """Query 1-hop and 2-hop graph neighborhood for candidate entities."""
+        direct_chunks: set[uuid.UUID] = set()
+        hop2_chunks: set[uuid.UUID] = set()
+        relations: list[dict[str, Any]] = []
+        connected_entities: dict[str, dict[str, Any]] = {}
+
+        if not entity_names:
+            return {
+                "direct_chunks": direct_chunks,
+                "hop2_chunks": hop2_chunks,
+                "relations": relations,
+                "connected_entities": [],
+            }
+
+        # 1. Query live FalkorDB if available
+        if await self._is_live():
+            client = get_redis_client()
+            try:
+                for name in entity_names[:6]:
+                    esc_name = name.strip().replace("'", "\\'")
+                    query = (
+                        f"MATCH (e:Entity) WHERE toLower(e.name) = toLower('{esc_name}') "
+                        f"OPTIONAL MATCH (c1:Chunk)-[:MENTIONS]->(e) "
+                        f"OPTIONAL MATCH (e)-[r:RELATION]-(other:Entity) "
+                        f"OPTIONAL MATCH (c2:Chunk)-[:MENTIONS]->(other) "
+                        f"RETURN c1.id, other.name, other.type, r.relation, c2.id"
+                    )
+                    raw_res = await client.execute_command("GRAPH.QUERY", self.graph_name, query)
+                    if raw_res and len(raw_res) > 1 and raw_res[1]:
+                        for row in raw_res[1]:
+                            if row[0]:
+                                try:
+                                    direct_chunks.add(uuid.UUID(str(row[0])))
+                                except ValueError:
+                                    pass
+                            if len(row) >= 4 and row[1] and row[3]:
+                                other_name = str(row[1])
+                                other_type = str(row[2]) if row[2] else "Entity"
+                                rel_name = str(row[3])
+                                connected_entities[other_name] = {"name": other_name, "type": other_type}
+                                relations.append({"source": name, "relation": rel_name, "target": other_name})
+                            if len(row) >= 5 and row[4]:
+                                try:
+                                    c2_id = uuid.UUID(str(row[4]))
+                                    if c2_id not in direct_chunks:
+                                        hop2_chunks.add(c2_id)
+                                except ValueError:
+                                    pass
+            except Exception as exc:
+                logger.warning("FalkorDB multi-hop query failed (%s). Falling back to memory index.", exc)
+            finally:
+                await client.aclose()
+
+        # 2. In-Memory Graph Index fallback / complement
+        lower_names = {n.strip().lower() for n in entity_names}
+        matched_node_ids = {
+            n_id for n_id, n_data in self._nodes.items()
+            if n_data["type"] == "Entity" and n_data["properties"].get("name", "").lower() in lower_names
+        }
+
+        neighbor_node_ids: set[str] = set()
+        for edge in self._edges:
+            if edge["target"] in matched_node_ids and edge["relation"] == "MENTIONS":
+                c_id_str = edge["properties"].get("chunk_id")
+                if c_id_str:
+                    try:
+                        direct_chunks.add(uuid.UUID(c_id_str))
+                    except ValueError:
+                        pass
+
+            if edge["source"] in matched_node_ids and edge["target"] not in matched_node_ids:
+                other = self._nodes.get(edge["target"])
+                if other and other["type"] == "Entity":
+                    neighbor_node_ids.add(edge["target"])
+                    o_name = other["properties"].get("name", "")
+                    o_type = other["properties"].get("entity_type", "")
+                    connected_entities[o_name] = {"name": o_name, "type": o_type}
+                    relations.append({
+                        "source": self._nodes[edge["source"]]["properties"].get("name", ""),
+                        "relation": edge["relation"],
+                        "target": o_name,
+                    })
+
+            if edge["target"] in matched_node_ids and edge["source"] not in matched_node_ids:
+                other = self._nodes.get(edge["source"])
+                if other and other["type"] == "Entity":
+                    neighbor_node_ids.add(edge["source"])
+                    o_name = other["properties"].get("name", "")
+                    o_type = other["properties"].get("entity_type", "")
+                    connected_entities[o_name] = {"name": o_name, "type": o_type}
+                    relations.append({
+                        "source": o_name,
+                        "relation": edge["relation"],
+                        "target": self._nodes[edge["target"]]["properties"].get("name", ""),
+                    })
+
+        for edge in self._edges:
+            if edge["target"] in neighbor_node_ids and edge["relation"] == "MENTIONS":
+                c_id_str = edge["properties"].get("chunk_id")
+                if c_id_str:
+                    try:
+                        c_uid = uuid.UUID(c_id_str)
+                        if c_uid not in direct_chunks:
+                            hop2_chunks.add(c_uid)
+                    except ValueError:
+                        pass
+
+        return {
+            "direct_chunks": direct_chunks,
+            "hop2_chunks": hop2_chunks,
+            "relations": relations,
+            "connected_entities": list(connected_entities.values()),
+        }
+
     def get_document_graph(self, doc_id: uuid.UUID) -> GraphVisualizationResponse:
         """Return graph nodes and edges for visualization filtered by document."""
         doc_str = str(doc_id)

@@ -391,3 +391,45 @@ async def test_end_to_end_understanding_pipeline():
         audit_data = audit_verify_resp.json()
         assert audit_data["valid"] is True
         assert audit_data["total_records"] >= 2  # upload + process_understanding
+
+
+def test_local_embedder_bge_query_prefix_and_neural_status():
+    """Verify BGE asymmetric query prefixing and high-fidelity neural model loading."""
+    embedder = get_local_embedder()
+    assert embedder.is_neural is True, "FastEmbed ONNX weights must be active in air-gapped enclave"
+
+    query = "integrated border surveillance and air defense network"
+    passage_rel = "air defense missiles and radar systems deployed across the northern sector"
+    passage_irrel = "fresh farm butter, flour, sugar and strawberries baked in oven"
+
+    q_vec = embedder.embed_query(query)
+    rel_vec = embedder.embed_text(passage_rel)
+    irrel_vec = embedder.embed_text(passage_irrel)
+
+    assert len(q_vec) == embedder.dimension
+    assert len(rel_vec) == embedder.dimension
+    assert len(irrel_vec) == embedder.dimension
+
+    score_rel = float(np.dot(np.array(q_vec), np.array(rel_vec)))
+    score_irrel = float(np.dot(np.array(q_vec), np.array(irrel_vec)))
+
+    assert score_rel > 0.50, f"Relevant similarity should be high ({score_rel})"
+    assert score_rel - score_irrel > 0.25, f"Discriminative margin ({score_rel - score_irrel}) must exceed 0.25"
+
+
+def test_local_embedder_initialize_prewarm():
+    """Verify FastEmbed initialize pre-warms RAM with zero errors."""
+    embedder = get_local_embedder()
+    assert embedder.initialize() is True
+
+
+def test_semantic_chunker_overlap_provenance():
+    """Verify that chunking with sentence overlap preserves 100% slice provenance."""
+    chunker = SemanticChunker(min_chunk_chars=100, target_chunk_chars=200, max_chunk_chars=350, overlap_chars=80)
+    chunks = chunker.chunk_text(SAMPLE_DOCUMENT_TEXT)
+
+    assert len(chunks) >= 3
+    for idx, c in enumerate(chunks):
+        assert c.verify_provenance(SAMPLE_DOCUMENT_TEXT) is True, f"Chunk {idx} violated provenance"
+        assert SAMPLE_DOCUMENT_TEXT[c.char_offset_start : c.char_offset_end] == c.text
+

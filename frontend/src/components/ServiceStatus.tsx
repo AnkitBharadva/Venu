@@ -72,7 +72,7 @@ export const ServiceStatus: React.FC = () => {
         {/* FastAPI Backend */}
         <div className="flex items-center space-x-1.5 text-[#6F6D68] shrink-0">
           <span className="text-[11px] text-[#99958D]">API:</span>
-          <span className="text-[#30302E]">8000</span>
+          <span className="text-[#30302E]">8001</span>
           <span className="text-[#7E9D82] text-[9px]">●</span>
         </div>
 
@@ -93,7 +93,7 @@ export const ServiceStatus: React.FC = () => {
         {/* Qdrant */}
         <div className="flex items-center space-x-1.5 text-[#6F6D68] shrink-0">
           <span className="text-[11px] text-[#99958D]">Vector:</span>
-          <span className="text-[#30302E]">6333</span>
+          <span className="text-[#30302E]">6335</span>
           {health?.dependencies?.qdrant?.latency_ms !== undefined && (
             <span className="text-[#99958D] text-[10px]">({Math.round(health.dependencies.qdrant.latency_ms)}ms)</span>
           )}

@@ -27,22 +27,22 @@
   │                                                                                  │                │
   │                                                                                  ▼                │
   │   ┌───────────────────────────┐    ┌───────────────────────────┐    ┌─────────────────────────┐   │
-  │   │Phase 6: Human Review Gate │    │Phase 5: Defense Security  │    │Phase 4: 7 Output Adapts │   │
+  │   │Phase 6: Human Review Gate │    │Phase 5: Defense Security  │    │Phase 4: 8 Output Adapts │   │
   │   │- Draft Lock (HTTP 403)    │◄───│- RBAC (Operator/Reviewer) │◄───│- LinkedIn Post (Social) │   │
-  │   │- Sentence Accept / Reject │    │- Append-Only SHA256 Chain │    │- Twitter Thread (Social)│   │
+  │   │- Dedicated Review Queue   │    │- Append-Only SHA256 Chain │    │- Twitter Thread (Social)│   │
   │   │- Inline Edit & Git Diffs  │    │- At-Rest AES-256-GCM      │    │- Exec Summary (Briefing)│   │
   │   │- Final Sign-off -> Export │    │- Zero-Egress Network Guard│    │- Advisory (Operational)│   │
   │   └───────────────────────────┘    └───────────────────────────┘    │- Presentation (Slides)  │   │
   │                 │                                                   │- Video Package (Scripts)│   │
   │                 ▼                                                   │- Infographic Spec (Data)│   │
-  │        [Authenticated Exports]                                      └─────────────────────────┘   │
-  │        (.md, .json, .html, .txt)                                                                  │
+  │        [Authenticated Exports]                                      │- Tech Documentation     │   │
+  │        (.md, .json, .html, .txt)                                    └─────────────────────────┘   │
   └─────────────────┬───────────────────────────┬───────────────────────────┬─────────────────────────┘
                     ▼                           ▼                           ▼
           [ PostgreSQL 16 ]            [ Qdrant Vector DB ]         [ FalkorDB Knowledge Graph ]
           - Source Documents Metadata  - 384-dim Dense Vectors      - Entity Nodes & Relations
-          - Immutable Audit Log Ledger - Cosine Similarity Retrieval- Cypher Subgraph Traversal
-          - Linear SHA-256 Hash Chain  - Payload Chunk Metadata     - Cross-Entity Multi-Hop Path
+          - Immutable Audit Log Ledger - Cosine Similarity Retrieval- Spanning Chain Subgraphs
+          - Linear SHA-256 Hash Chain  - Payload Chunk Metadata     - 60 FPS LOD Visualizer
 ```
 
 ```mermaid
@@ -50,8 +50,8 @@ flowchart TD
     subgraph INGESTION["1. Ingestion Pipeline"]
         SRC[Raw Input Files\nPDF / DOCX / PPTX / Images / Video / Audio] --> ROUTER{File Router\nMagic Bytes & MIME}
         ROUTER -->|PDF / DOCX / PPTX| DOCLING[Docling Structured Parser]
-        ROUTER -->|Scanned PNG / JPG| OCR[PaddleOCR Engine]
-        ROUTER -->|Audio WAV / Video MP4| ASR[Whisper ASR Speech-to-Text]
+        ROUTER -->|Scanned PNG / JPG / BMP / WEBP / TIFF| OCR[Qwen-VL Vision + PaddleOCR]
+        ROUTER -->|Audio WAV / MP3 / Video MP4 / MKV| ASR[Whisper ASR Speech-to-Text]
         DOCLING & OCR & ASR --> AES1[AES-256-GCM Enclave Disk Storage]
         AES1 --> NORM[Normalized SourceDocument Schema]
     end
@@ -61,7 +61,7 @@ flowchart TD
         CHUNK --> EXTRACT[Entity, Topic & Intent Extractor]
         CHUNK --> EMBED[Local 384-dim Dense Embedder\nall-MiniLM-L6-v2]
         EMBED --> QDRANT[(Qdrant Vector DB)]
-        EXTRACT --> FALKOR[(FalkorDB Knowledge Graph)]
+        EXTRACT --> FALKOR[(FalkorDB Knowledge Graph\nSpanning-Chain Topology)]
     end
 
     subgraph GROUNDING["3. Grounding & Retrieval"]
@@ -69,7 +69,7 @@ flowchart TD
         RETRIEVE --> CONTRACT{Hard Citation Contract Gatekeeper\nZero Hallucination Contract}
     end
 
-    subgraph ADAPTERS["4. Modular Deliverable Adapters"]
+    subgraph ADAPTERS["4. Modular Deliverable Adapters (8 Formats)"]
         CONTRACT --> ADAP_LI[LinkedIn Post]
         CONTRACT --> ADAP_TW[Twitter/X Thread]
         CONTRACT --> ADAP_EX[Executive Summary]
@@ -77,13 +77,14 @@ flowchart TD
         CONTRACT --> ADAP_PRES[Presentation Deck]
         CONTRACT --> ADAP_VID[Video Package]
         CONTRACT --> ADAP_INFO[Infographic Layout]
+        CONTRACT --> ADAP_TECH[Technical Documentation]
     end
 
     subgraph SECURITY["5 & 6. Defense Security & Human Review"]
-        ADAP_LI & ADAP_TW & ADAP_EX & ADAP_ADV & ADAP_PRES & ADAP_VID & ADAP_INFO --> DRAFT[Status: draft\nExport Locked HTTP 403]
-        DRAFT --> REVIEW[Reviewer Studio\nSentence Accept / Reject / Inline Edit]
+        ADAP_LI & ADAP_TW & ADAP_EX & ADAP_ADV & ADAP_PRES & ADAP_VID & ADAP_INFO & ADAP_TECH --> DRAFT[Status: draft\nExport Locked HTTP 403]
+        DRAFT --> REVIEW[Human Review Workspace\nReview Queue / Claim Inspector / Inline Edit]
         REVIEW --> DIFF[Git-Style Unified Diff History]
-        DIFF --> SIGN[Reviewer Sign-off\nTransition -> final]
+        DIFF --> SIGN[Reviewer Sign-off\nTransition -> final / approved]
         SIGN --> EXPORT[Export Unlocked\nMarkdown / JSON / HTML / Plain Text]
         EXPORT --> AUDIT[(PostgreSQL Audit Log\nLinear SHA-256 Hash Chain)]
     end
@@ -99,9 +100,9 @@ flowchart TD
 | **Backend Core** | FastAPI, Uvicorn, Python | Python 3.11, FastAPI 0.115 | High-concurrency async ASGI server inside Faraday enclave |
 | **Relational Metadata** | PostgreSQL | PostgreSQL 16 Alpine | Relational schemas, read-only audit triggers, foreign keys |
 | **Vector Engine** | Qdrant | v1.12+ Local | On-premise HNSW vector index, cosine similarity search |
-| **Knowledge Graph** | FalkorDB (RedisGraph) | v0.4+ Local | OpenCypher graph database for multi-hop entity grounding |
+| **Knowledge Graph** | FalkorDB (RedisGraph) | v0.4+ Local | OpenCypher graph with spanning-chain topology for 60 FPS LOD rendering |
 | **Document Ingestion** | Docling, python-docx, pypdf | Native Python Libraries | Structural document extraction with heading hierarchies |
-| **Vision & OCR** | PaddleOCR, Pillow | Local ONNX/Pillow Engine | Offline OCR for scanned records and low-contrast imagery |
+| **Vision & OCR** | Local Qwen-VL, PaddleOCR, Pillow | Local Multimodal & ONNX Engine | Offline OCR & visual scene extraction for scans and photos |
 | **Speech & Media ASR**| Whisper | Whisper Local Inference | Timestamped speech-to-text with segment-level alignment |
 | **Dense Embeddings** | Sentence-Transformers | 384-dimensional dense | Local CPU/CUDA inference, L2-normalized cosine vectors |
 | **At-Rest Cryptography**| AES-256-GCM | PyCryptodome / Cryptography | Authenticated encryption for documents and outputs |

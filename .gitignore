@@ -45,6 +45,7 @@ Thumbs.db
 
 # Model weights & large binaries (keep git lightweight)
 models/weights/*
+models/cache/*
 !models/weights/.gitkeep
 *.bin
 *.pt

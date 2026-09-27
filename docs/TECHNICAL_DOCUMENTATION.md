@@ -73,7 +73,7 @@ The **SIH26155 Platform** is an on-premise, defense-grade, air-gapped automated 
 │                                                                                             │                   │
 │                                                                                             ▼                   │
 │   ┌────────────────────────────────┐   ┌────────────────────────────────┐   ┌───────────────────────────────┐   │
-│   │  Phase 6: Human Review Studio  │   │  Phase 5: Security & Audit     │   │  Phase 4: 7 Output Adapters   │   │
+│   │  Phase 6: Human Review Studio  │   │  Phase 5: Security & Audit     │   │  Phase 4: 8 Output Adapters   │   │
 │   │  - Status Gate: Draft -> Final │◄──┤  - RBAC (Operator vs Reviewer) │◄──┤  - LinkedIn Post (Social)     │   │
 │   │  - Sentence Accept / Reject    │   │  - Linear SHA-256 Hash Chain   │   │  - Twitter Thread (Social)    │   │
 │   │  - Git-Style Unified Diffs     │   │  - AES-256-GCM Verification    │   │  - Exec Summary (Briefing)    │   │
@@ -81,6 +81,7 @@ The **SIH26155 Platform** is an on-premise, defense-grade, air-gapped automated 
 │   └────────────────────────────────┘   └────────────────────────────────┘   │  - Presentation (Deck JSON)   │   │
 │                                                                             │  - Video Package (Audio/Vis)  │   │
 │                                                                             │  - Infographic (Visual Layout)│   │
+│                                                                             │  - Tech Documentation (Spec)  │   │
 │                                                                             │  - Config-Driven Dynamic Reg. │   │
 │                                                                             └───────────────────────────────┘   │
 └─────────────────────────┬───────────────────────────────┬───────────────────────────────┬───────────────────────┘
@@ -568,7 +569,7 @@ The `/api/v1/grounding/trace` endpoint ([`app/services/grounding/trace_service.p
 
 ## 8. Modular Deliverable Generation Adapters (Phase 4)
 
-Phase 4 defines a unified adapter interface allowing the system to generate 7 deliverable formats, while supporting zero-code dynamic format registration.
+Phase 4 defines a unified adapter interface allowing the system to generate 8 deliverable formats, while supporting zero-code dynamic format registration.
 
 ### 8.1 Common Adapter Interface
 
@@ -706,18 +707,30 @@ stateDiagram-v2
 
 The frontend is a React 18 single-page application bundled with Vite and Tailwind CSS ([`frontend/src/components/BlankDashboard.tsx`](file:///D:/Venu/frontend/src/components/BlankDashboard.tsx)), designed for standalone air-gapped workstations.
 
-### 11.1 Key UI Modules
+### 11.1 Core Navigation Workspaces & Modules
 
-1. **Role Switcher Header:** Toggle between `Operator`, `Reviewer`, and `Admin` identities. Visual indicators reflect granted permissions in real time.
-2. **Air-Gap Status Beacon:** Real-time green indicator: `"Offline Mode: Active &bull; Zero Egress Enclave"`. Clicking opens the **Air-Gap Verification Modal**, displaying the raw TCP socket probe result (`1.1.1.1:53` blocked).
-3. **1-Click Operational Test Samples:**
-   - *Sample A:* Technical Directive (Clean DOCX Report).
-   - *Sample B:* Reconnaissance Report (Scanned PDF Document).
-   - *Sample C:* Tactical Field Recording (Whisper Audio/Video Clip).
-4. **Multi-Format Selector & Configuration Panel:** Multi-select checkboxes for all 7 formats with sliders and dropdowns for the 6 generation parameters.
-5. **Generation & Provenance Viewer:** Tabbed output view with sentence-level hover cards. Hovering over any sentence immediately calls `/trace` and displays the source paragraph, character offsets, section heading, and page number in a side drawer.
-6. **Review Studio:** Sentence-level approval toggles (`Accept` / `Reject`), inline text editing drawer, and visual diff history timeline.
-7. **Filterable Audit Ledger:** Interactive audit table displaying actor, action, timestamp, source hash, previous hash, and current hash with a one-click `"Verify Cryptographic Chain"` button.
+1. **Dual-Persona Switcher & Enclave Header:**
+   - Instant toggle between **`Operator (Analyst)`** and **`Reviewer (Approver)`** identities. Visual badges reflect permissions in real time.
+   - Real-time green indicator: `"Offline Mode: Active (Zero Outbound Egress)"`.
+   - **Air-Gap Verification Modal:** Displays raw TCP socket probe result (`1.1.1.1:53` blocked with `Errno 10051 / 10060`), container topology, and dependency security audit.
+2. **Transformation Studio Workspace (`Studio` Tab):**
+   - **1-Click Operational Test Samples:** *Defence Directive 2026*, *SCADA Cyber Advisory*, and *Maritime Reconnaissance Log*.
+   - **Multi-Format Selector & Configuration Panel:** Multi-select checkboxes for all 8 deliverable formats with sliders/dropdowns for the 6 generation parameters (`Audience`, `Tone`, `Language`, `Detail Level`, `Objective`, `Style`) plus quick-load presets (*DoD Directive*, *Executive Brief*, *Threat Alert*, *Public Advisory*).
+   - **Generation & Provenance Viewer:** Tabbed output view with sentence-level interactive citation chips (`[Chunk #ID]`). Hovering or clicking any sentence triggers `/trace` and displays the source paragraph, character offsets, section heading, and verbatim quote in a provenance panel.
+   - **In-Place Review Banner:** Displays status (`draft`, `pending_review`, `approved`, `rejected`) with quick "Submit for Review", "Approve", and gatekeeper-locked export buttons.
+3. **Dedicated Human Review Workspace (`Human Review` Tab):**
+   - Component: [`frontend/src/components/HumanReviewWorkspace.tsx`](frontend/src/components/HumanReviewWorkspace.tsx).
+   - **Review Queue:** Filterable by status (`All`, `Pending`, `Draft`, `Approved`, `Rejected`) and search query.
+   - **Sentence-Level Claim Inspector:** Claim-by-claim breakdown showing verified source citations, character offsets, and ground-truth quotations.
+   - **Inline Sentence Editor:** Edit claims in place with author attribution.
+   - **Git-Style Unified Diff History:** Side-by-side before/after view computed via `difflib.unified_diff`.
+   - **Dual-Control Sign-Off:** Reviewer authorization (`Approve` / `Reject`) unlocking multi-format export.
+4. **Knowledge & Grounding Explorer Workspace (`Knowledge & Grounding` Tab):**
+   - Component: [`frontend/src/components/KnowledgeGraphVisualizer.tsx`](frontend/src/components/KnowledgeGraphVisualizer.tsx).
+   - **60 FPS Force-Directed Graph Engine:** Renders interactive Document, Chunk, Entity, and Topic nodes with dynamic Level-of-Detail (LOD), spanning-chain `SHARES_ENTITY` edges, Coulomb cutoff at 250px, and fast damping (0.78).
+   - **Qdrant Vector Search:** Semantic vector search with Cosine similarity score meters and chunk offset inspector.
+5. **Filterable Audit Ledger Workspace (`Audit Ledger` Tab):**
+   - Real-time tabular audit viewer querying `GET /api/v1/audit/logs` with action and actor filters, free-text search, expandable event JSON inspector, one-click SHA-256 hash copy, and live chain re-verification (`/api/v1/audit/verify-chain`).
 
 ---
 

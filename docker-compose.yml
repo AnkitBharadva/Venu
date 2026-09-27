@@ -46,8 +46,8 @@ services:
       - qdrant_data:/qdrant/storage
       - ./infra/qdrant/config.yaml:/qdrant/config/production.yaml:ro
     ports:
-      - "127.0.0.1:6333:6333"
-      - "127.0.0.1:6334:6334"
+      - "127.0.0.1:6335:6333"
+      - "127.0.0.1:6336:6334"
     networks:
       - enclave_net
     healthcheck:
@@ -104,7 +104,7 @@ services:
       - ./models:/models:ro
       - encrypted_uploads:/data/encrypted_uploads
     ports:
-      - "8000:8000"
+      - "8001:8001"
     networks:
       - enclave_net
     depends_on:
@@ -115,7 +115,7 @@ services:
       falkordb:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health/live"]
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health/live"]
       interval: 10s
       timeout: 5s
       retries: 3

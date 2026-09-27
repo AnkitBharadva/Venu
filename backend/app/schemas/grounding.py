@@ -74,6 +74,8 @@ class RetrievedChunkItem(BaseModel):
     score: float = Field(..., description="Composite hybrid relevance score")
     vector_score: float = Field(..., description="Cosine similarity score from Qdrant")
     graph_score: float = Field(..., description="Knowledge graph connectivity score from FalkorDB")
+    bm25_score: float = Field(default=0.0, description="BM25 lexical score")
+    rerank_score: float = Field(default=0.0, description="Cross-encoder precision rerank score")
     char_offset_start: int
     char_offset_end: int
     heading: str | None = None

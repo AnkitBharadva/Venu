@@ -61,6 +61,28 @@ async def lifespan(app: FastAPI):
                 logger.info("Genesis audit log entry initialized.")
     except Exception as exc:
         logger.warning("Database startup initialization check: %s", exc)
+
+    # Ensure Qdrant vector store collection schema is verified and active
+    try:
+        from app.services.storage.qdrant_service import get_qdrant_service
+        qdrant = get_qdrant_service()
+        qdrant.ensure_collection()
+    except Exception as exc:
+        logger.warning("Qdrant collection verification startup check: %s", exc)
+
+    # Pre-warm local embedding engine
+    try:
+        from app.services.embeddings.local_embedder import get_local_embedder
+        embedder = get_local_embedder()
+        embedder.initialize()
+        logger.info(
+            "LocalEmbedder pre-warmed (Neural: %s, Dimension: %s)",
+            embedder.is_neural,
+            embedder.dimension,
+        )
+    except Exception as exc:
+        logger.warning("LocalEmbedder pre-warming skipped: %s", exc)
+
     yield
     logger.info("Shutting down %s cleanly.", settings.PROJECT_NAME)
 

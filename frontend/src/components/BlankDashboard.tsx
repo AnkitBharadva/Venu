@@ -595,7 +595,7 @@ export const BlankDashboard: React.FC = () => {
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Batch ingestion failed';
       if (msg.toLowerCase().includes('failed to fetch')) {
-        setUploadError('Unable to connect to backend server. Ensure the backend is active on http://localhost:8000.');
+        setUploadError('Unable to connect to backend server. Ensure the backend is active on http://localhost:8001.');
       } else {
         setUploadError(msg);
       }

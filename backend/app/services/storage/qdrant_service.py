@@ -59,6 +59,32 @@ class QdrantService:
                         distance=models.Distance.COSINE,
                     ),
                 )
+            else:
+                # Validate existing collection vector dimension matches self.dimension
+                try:
+                    c_info = client.get_collection(self.collection_name)
+                    existing_size = None
+                    if hasattr(c_info.config.params, "vectors"):
+                        v_cfg = c_info.config.params.vectors
+                        if hasattr(v_cfg, "size"):
+                            existing_size = v_cfg.size
+                    if existing_size is not None and existing_size != self.dimension:
+                        logger.info(
+                            "Recreating collection '%s' to match updated embedding dimension (%d -> %d)",
+                            self.collection_name,
+                            existing_size,
+                            self.dimension,
+                        )
+                        client.delete_collection(self.collection_name)
+                        client.create_collection(
+                            collection_name=self.collection_name,
+                            vectors_config=models.VectorParams(
+                                size=self.dimension,
+                                distance=models.Distance.COSINE,
+                            ),
+                        )
+                except Exception as c_err:
+                    logger.warning("Could not verify collection dimension: %s", c_err)
             return True
         except Exception as exc:
             logger.warning("Failed to initialize Qdrant collection '%s': %s", self.collection_name, exc)
@@ -133,7 +159,7 @@ class QdrantService:
     ) -> list[SemanticSearchResultItem]:
         """Perform semantic similarity retrieval against chunk vectors."""
         embedder = get_local_embedder()
-        query_vector = embedder.embed_text(query)
+        query_vector = embedder.embed_query(query)
 
         results: list[SemanticSearchResultItem] = []
 
