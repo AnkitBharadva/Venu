@@ -1,71 +1,277 @@
-# Byte-compiled / optimized / DLL files
+# ==============================================================================
+# PROJECT VENU — COMPREHENSIVE GITIGNORE
+# Air-Gapped GenAI Content Transformation & Strategic Intelligence Platform
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. Operating System & Local Artifacts
+# ------------------------------------------------------------------------------
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Linux
+*~
+.directory
+.fuse_hidden*
+.nfs*
+
+# ------------------------------------------------------------------------------
+# 2. IDE, Editor & Tooling Workspaces
+# ------------------------------------------------------------------------------
+# Visual Studio Code
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.code-workspace
+
+# JetBrains (PyCharm, WebStorm, IntelliJ)
+.idea/
+*.iws
+*.iml
+*.ipr
+out/
+
+# Cursor & AI Editors
+.cursor/
+.cursorrules.local
+
+# Vim / Emacs / Sublime
+*.swp
+*.swo
+*.swn
+*~
+*.bak
+*.sublime-project
+*.sublime-workspace
+
+# ------------------------------------------------------------------------------
+# 3. Python Runtime, Compiles & Virtual Environments
+# ------------------------------------------------------------------------------
+# Byte-compiled / optimized files
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
 
+# Distribution / packaging
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
 # Virtual environments
 .env
 .venv
-env/
+.venv*/
 venv/
+venv*/
+env/
+env*/
 ENV/
 env.bak/
 venv.bak/
 
-# Environment files
-!.env.example
+# PyInstaller & binary output
+*.manifest
+*.spec
 
-# Node.js
+# ------------------------------------------------------------------------------
+# 4. Node.js, Frontend & Build Artifacts
+# ------------------------------------------------------------------------------
+# Dependency directory
 node_modules/
+frontend/node_modules/
+
+# Production build outputs
+frontend/dist/
+frontend/build/
+dist/
+out/
+
+# Vite & Bundler cache
+.vite/
+frontend/.vite/
+.eslintcache
+.stylelintcache
+.parcel-cache/
+
+# TypeScript compiler output & cache
+*.tsbuildinfo
+.tscache/
+
+# Package manager logs
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
-frontend/build/
-frontend/dist/
+lerna-debug.log*
 
-# Testing & Coverage
+# ------------------------------------------------------------------------------
+# 5. Testing, Linting & Code Quality
+# ------------------------------------------------------------------------------
+# Pytest & Coverage
+.cache
+.pytest_cache/
+backend/.pytest_cache/
 .coverage
 .coverage.*
-.pytest_cache/
 htmlcov/
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+
+# Type checking & Linters
 .mypy_cache/
+backend/.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
 .ruff_cache/
+backend/.ruff_cache/
 
-# IDE / Editor files
-.idea/
-.vscode/
-*.swp
-*.swo
-*~
-.DS_Store
-Thumbs.db
+# Playwright & Browser test artifacts
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
 
-# Model weights & large binaries (keep git lightweight)
+# ------------------------------------------------------------------------------
+# 6. Environment Configurations, Credentials & Keys
+# ------------------------------------------------------------------------------
+# Environment secrets (always keep example templates)
+.env
+.env.*
+!.env.example
+!.env.template
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Cryptographic Keys & Certificates
+*.pem
+*.key
+*.crt
+*.cer
+*.pfx
+*.p12
+*.csr
+master_key.txt
+encryption_key.bin
+secret.key
+
+# ------------------------------------------------------------------------------
+# 7. Persistent Databases, Volumes & Cache
+# ------------------------------------------------------------------------------
+# Docker volumes & local data directories
+data/
+backend/data/
+postgres_data/
+qdrant_data/
+falkordb_data/
+redis_data/
+
+# SQLite & embedded database engines
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.db-wal
+*.db-shm
+dump.rdb
+
+# ------------------------------------------------------------------------------
+# 8. Large AI Models, Weights & Embeddings Cache
+# ------------------------------------------------------------------------------
+# Model weights & checkpoint binaries (keep repository lightweight)
 models/weights/*
-models/cache/*
 !models/weights/.gitkeep
+models/cache/*
+!models/cache/.gitkeep
 *.bin
 *.pt
 *.pth
 *.safetensors
 *.onnx
 *.gguf
+*.tflite
 
-# Storage & Database data volumes
-data/
-postgres_data/
-qdrant_data/
-falkordb_data/
-*.db
-*.sqlite3
+# Local Model HuggingFace / Ollama download caches
+.cache/huggingface/
+.cache/ollama/
+.cache/torch/
 
-# Temporary files & logs
-*.log
-logs/
+# ------------------------------------------------------------------------------
+# 9. Storage Enclaves, Ingestion Temp & Scratch Files
+# ------------------------------------------------------------------------------
+# Encrypted raw uploads & extracted text buffers
+storage/
+backend/storage/
+storage/encrypted_raw/*
+!storage/encrypted_raw/.gitkeep
+encrypted_raw/
+
+# Temporary directories & verification drops
 tmp/
+temp/
 scratch/
 tmp_verification_uploads/
 *verification_uploads/
+temp_renders/
+hf_render_*/
+
+# ------------------------------------------------------------------------------
+# 10. Generated Video, Audio & Visual Media Exports
+# ------------------------------------------------------------------------------
+# Media test renders & exports (keep source code clean)
+*.mp4
+*.webm
+*.avi
+*.mov
+*.mkv
+*.wav
+*.mp3
+test_export.mp4
+*_card.png
+*_thread_cards.zip
+
+# ------------------------------------------------------------------------------
+# 11. Logs & Diagnostics
+# ------------------------------------------------------------------------------
+*.log
+logs/
+backend/logs/
+.system_generated/

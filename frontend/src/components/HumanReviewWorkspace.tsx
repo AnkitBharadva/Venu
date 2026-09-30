@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { PostVisualCardStudioModal, PostCardStudioState } from './PostVisualCardStudioModal';
+import { HyperFramesVideoStudioModal, VideoStudioState } from './HyperFramesVideoStudioModal';
 
 export interface GroundingCitation {
   chunk_id: string;
@@ -114,6 +116,12 @@ export const HumanReviewWorkspace: React.FC<HumanReviewWorkspaceProps> = ({
   // Export Format
   const [exportFormat, setExportFormat] = useState('markdown');
   const [isExporting, setIsExporting] = useState(false);
+
+  // Dedicated Post Visual Card Studio State
+  const [postCardStudio, setPostCardStudio] = useState<PostCardStudioState | null>(null);
+
+  // Dedicated HyperFrames Video Studio State
+  const [videoStudio, setVideoStudio] = useState<VideoStudioState | null>(null);
 
   // Fetch pending deliverables queue
   const fetchDeliverables = useCallback(async () => {
@@ -372,6 +380,729 @@ export const HumanReviewWorkspace: React.FC<HumanReviewWorkspaceProps> = ({
     }
   };
 
+  const handleOpenPostCardModal = async (
+    d: DeliverableData,
+    targetBlockIndex?: number,
+    customText?: string,
+    ratio: '16:9' | '1:1' | '4:3' | '9:16' = '16:9',
+    theme: string = 'cyber_dark',
+    font: 'sans' | 'serif' | 'mono' = 'sans',
+    layout: 'auto' | 'hero' | 'split' | 'technical' | 'minimal' = 'auto',
+    brandName: string = 'AIZ INTELLIGENCE',
+    classification: string = 'VERIFIED CLAIM'
+  ) => {
+    const isMultiPart =
+      d.deliverable_type === 'twitter_thread' ||
+      (d.content?.blocks && d.content.blocks.length > 1);
+
+    setPostCardStudio({
+      cardId: '',
+      title: d.content?.title || 'Post Visual Card',
+      postText: customText || '',
+      deliverableType: d.deliverable_type,
+      aspectRatio: ratio,
+      theme: theme,
+      fontFamily: font,
+      layoutPreset: layout,
+      brandName: brandName,
+      classification: classification,
+      previewUrl: '',
+      pngDownloadUrl: '',
+      isLoading: true,
+      isDownloadingPng: false,
+      error: null,
+      cards: [],
+      activeCardIndex: targetBlockIndex ?? 0,
+    });
+
+    try {
+      if (isMultiPart && !customText) {
+        // Generate thread cards for every tweet/post in the sequence
+        const res = await fetch('/api/v1/infographics/generate-thread-cards', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            output_id: d.output_id,
+            doc_id: d.doc_id,
+            deliverable_type: d.deliverable_type,
+            title: d.content?.title,
+            blocks: d.content?.blocks,
+            aspect_ratio: ratio,
+            theme: theme,
+            font_family: font,
+            layout_preset: layout,
+            brand_name: brandName,
+            classification: classification,
+          }),
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => null);
+          throw new Error(err?.detail || `HTTP ${res.status}`);
+        }
+
+        const data = await res.json();
+        const cards = data.cards || [];
+        const activeIdx =
+          targetBlockIndex !== undefined && targetBlockIndex < cards.length
+            ? targetBlockIndex
+            : 0;
+        const activeCard = cards[activeIdx] || cards[0];
+
+        setPostCardStudio({
+          cardId: activeCard?.card_id || '',
+          title: activeCard?.title || d.content?.title || 'Post Visual Card',
+          postText: activeCard?.post_text || '',
+          deliverableType: d.deliverable_type,
+          aspectRatio: ratio,
+          theme: theme,
+          fontFamily: font,
+          layoutPreset: layout,
+          brandName: brandName,
+          classification: classification,
+          previewUrl: activeCard?.preview_url || '',
+          pngDownloadUrl: activeCard?.png_download_url || '',
+          isLoading: false,
+          isDownloadingPng: false,
+          error: null,
+          cards: cards,
+          activeCardIndex: activeIdx,
+        });
+      } else {
+        // Single post mode
+        let textToPost = customText;
+        if (!textToPost) {
+          if (targetBlockIndex !== undefined && d.content?.blocks?.[targetBlockIndex]) {
+            textToPost =
+              d.content.blocks[targetBlockIndex].sentences
+                ?.map((s) => s.text)
+                .filter(Boolean)
+                .join(' ') || '';
+          } else {
+            const parts: string[] = [];
+            if (d.content?.blocks) {
+              for (const b of d.content.blocks) {
+                const sents = b.sentences?.map((s) => s.text).filter(Boolean) || [];
+                if (sents.length > 0) parts.push(sents.join(' '));
+              }
+            }
+            textToPost = parts.join('\n\n') || d.content?.summary || d.content?.title || '';
+          }
+        }
+
+        const res = await fetch('/api/v1/infographics/generate-post-card', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            output_id: d.output_id,
+            doc_id: d.doc_id,
+            deliverable_type: d.deliverable_type,
+            title: d.content?.title,
+            post_text: textToPost,
+            aspect_ratio: ratio,
+            theme: theme,
+            font_family: font,
+            layout_preset: layout,
+            brand_name: brandName,
+            classification: classification,
+          }),
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => null);
+          throw new Error(err?.detail || `HTTP ${res.status}`);
+        }
+
+        const data = await res.json();
+        const singleItem = {
+          card_id: data.card_id,
+          title: data.title,
+          post_text: textToPost || '',
+          sequence_index: 1,
+          sequence_total: 1,
+          sequence_label: 'Single Card',
+          preview_url: data.preview_url,
+          png_download_url: data.png_download_url,
+          aspect_ratio: ratio,
+          theme: theme,
+          font_family: font,
+          layout_preset: layout,
+          brand_name: brandName,
+          classification: classification,
+        };
+
+        setPostCardStudio({
+          cardId: data.card_id,
+          title: data.title,
+          postText: textToPost || '',
+          deliverableType: d.deliverable_type,
+          aspectRatio: ratio,
+          theme: theme,
+          fontFamily: font,
+          layoutPreset: layout,
+          brandName: brandName,
+          classification: classification,
+          previewUrl: data.preview_url,
+          pngDownloadUrl: data.png_download_url,
+          isLoading: false,
+          isDownloadingPng: false,
+          error: null,
+          cards: [singleItem],
+          activeCardIndex: 0,
+        });
+      }
+    } catch (err: any) {
+      setPostCardStudio((prev) =>
+        prev
+          ? {
+              ...prev,
+              isLoading: false,
+              error: err.message || 'Failed to compile post visual card',
+            }
+          : null
+      );
+    }
+  };
+
+  const handleSelectCardIndex = (idx: number) => {
+    if (!postCardStudio || !postCardStudio.cards[idx]) return;
+    const target = postCardStudio.cards[idx];
+    setPostCardStudio((prev) =>
+      prev
+        ? {
+            ...prev,
+            activeCardIndex: idx,
+            cardId: target.card_id,
+            title: target.title,
+            postText: target.post_text,
+            previewUrl: target.preview_url,
+            pngDownloadUrl: target.png_download_url,
+          }
+        : null
+    );
+  };
+
+  const handleUpdatePostCard = async (
+    newRatio?: '16:9' | '1:1' | '4:3' | '9:16',
+    newTheme?: string,
+    newText?: string,
+    newTitle?: string,
+    newFont?: 'sans' | 'serif' | 'mono',
+    newLayout?: 'auto' | 'hero' | 'split' | 'technical' | 'minimal',
+    newBrand?: string,
+    newClassification?: string
+  ) => {
+    if (!postCardStudio || !selectedDeliverable) return;
+    const ratio = newRatio || postCardStudio.aspectRatio;
+    const theme = newTheme || postCardStudio.theme;
+    const font = newFont || postCardStudio.fontFamily;
+    const layout = newLayout || postCardStudio.layoutPreset;
+    const brand = newBrand !== undefined ? newBrand : postCardStudio.brandName;
+    const classification = newClassification !== undefined ? newClassification : postCardStudio.classification;
+    const text = newText !== undefined ? newText : postCardStudio.postText;
+    const title = newTitle !== undefined ? newTitle : postCardStudio.title;
+
+    setPostCardStudio((prev) =>
+      prev
+        ? {
+            ...prev,
+            aspectRatio: ratio,
+            theme,
+            fontFamily: font,
+            layoutPreset: layout,
+            brandName: brand,
+            classification,
+            postText: text,
+            title,
+            isLoading: true,
+            error: null,
+          }
+        : null
+    );
+
+    try {
+      const isMultiCard = postCardStudio.cards.length > 1;
+      const isStyleOnlyChange =
+        isMultiCard &&
+        newText === undefined &&
+        (newRatio !== undefined ||
+          newTheme !== undefined ||
+          newFont !== undefined ||
+          newLayout !== undefined ||
+          newBrand !== undefined ||
+          newClassification !== undefined);
+
+      if (isStyleOnlyChange) {
+        // Re-generate the entire thread with the new styling!
+        const res = await fetch('/api/v1/infographics/generate-thread-cards', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            output_id: selectedDeliverable.output_id,
+            doc_id: selectedDeliverable.doc_id,
+            deliverable_type: postCardStudio.deliverableType,
+            title: title,
+            blocks: selectedDeliverable.content?.blocks,
+            aspect_ratio: ratio,
+            theme: theme,
+            font_family: font,
+            layout_preset: layout,
+            brand_name: brand,
+            classification: classification,
+          }),
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => null);
+          throw new Error(err?.detail || `HTTP ${res.status}`);
+        }
+
+        const data = await res.json();
+        const cards = data.cards || [];
+        const activeIdx = Math.min(postCardStudio.activeCardIndex, Math.max(0, cards.length - 1));
+        const activeCard = cards[activeIdx] || cards[0];
+
+        setPostCardStudio((prev) =>
+          prev
+            ? {
+                ...prev,
+                cardId: activeCard?.card_id || prev.cardId,
+                previewUrl: activeCard?.preview_url || prev.previewUrl,
+                pngDownloadUrl: activeCard?.png_download_url || prev.pngDownloadUrl,
+                cards,
+                isLoading: false,
+              }
+            : null
+        );
+      } else {
+        // Single card update
+        const res = await fetch('/api/v1/infographics/generate-post-card', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            output_id: selectedDeliverable.output_id,
+            doc_id: selectedDeliverable.doc_id,
+            deliverable_type: postCardStudio.deliverableType,
+            title: title,
+            post_text: text,
+            aspect_ratio: ratio,
+            theme: theme,
+            font_family: font,
+            layout_preset: layout,
+            brand_name: brand,
+            classification: classification,
+          }),
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => null);
+          throw new Error(err?.detail || `HTTP ${res.status}`);
+        }
+
+        const data = await res.json();
+        setPostCardStudio((prev) => {
+          if (!prev) return null;
+          const updatedCards = [...prev.cards];
+          if (updatedCards[prev.activeCardIndex]) {
+            updatedCards[prev.activeCardIndex] = {
+              ...updatedCards[prev.activeCardIndex],
+              card_id: data.card_id,
+              title: data.title,
+              post_text: text,
+              preview_url: data.preview_url,
+              png_download_url: data.png_download_url,
+              aspect_ratio: ratio,
+              theme: theme,
+              font_family: font,
+              layout_preset: layout,
+              brand_name: brand,
+              classification: classification,
+            };
+          }
+          return {
+            ...prev,
+            cardId: data.card_id,
+            previewUrl: data.preview_url,
+            pngDownloadUrl: data.png_download_url,
+            cards: updatedCards,
+            isLoading: false,
+          };
+        });
+      }
+    } catch (err: any) {
+      setPostCardStudio((prev) => (prev ? { ...prev, isLoading: false, error: err.message } : null));
+    }
+  };
+
+  const handleDownloadPostPNG = async () => {
+    if (!postCardStudio) return;
+    setPostCardStudio((prev) => (prev ? { ...prev, isDownloadingPng: true } : null));
+    try {
+      const res = await fetch(postCardStudio.pngDownloadUrl);
+      if (!res.ok) throw new Error('Download request failed');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const cleanTitle = (postCardStudio.title || 'post').toLowerCase().replace(/[^a-z0-9]+/g, '_');
+      a.download = `${cleanTitle}_card.png`;
+      a.click();
+      URL.revokeObjectURL(url);
+      onToast({ type: 'success', text: 'Downloaded high-resolution post visual PNG (2x retina)!' });
+    } catch (err: any) {
+      onToast({ type: 'alert', text: 'PNG download failed: ' + err.message });
+    } finally {
+      setPostCardStudio((prev) => (prev ? { ...prev, isDownloadingPng: false } : null));
+    }
+  };
+
+  const handleDownloadAllThreadPNGs = async () => {
+    if (!postCardStudio || !postCardStudio.cards.length) return;
+    setPostCardStudio((prev) => (prev ? { ...prev, isDownloadingPng: true } : null));
+
+    try {
+      for (let i = 0; i < postCardStudio.cards.length; i++) {
+        const c = postCardStudio.cards[i];
+        const res = await fetch(c.png_download_url);
+        if (!res.ok) throw new Error(`Failed to download ${c.sequence_label}`);
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const cleanTitle = (c.title || 'post').toLowerCase().replace(/[^a-z0-9]+/g, '_');
+        a.download = `${cleanTitle}_part_${c.sequence_index}_of_${c.sequence_total}.png`;
+        document.body.appendChild(a);
+        a.click();
+        URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        await new Promise((r) => setTimeout(r, 250));
+      }
+      onToast({ type: 'success', text: `Downloaded all ${postCardStudio.cards.length} thread cards as PNGs!` });
+    } catch (err: any) {
+      onToast({ type: 'alert', text: `Batch PNG download failed: ${err.message}` });
+    } finally {
+      setPostCardStudio((prev) => (prev ? { ...prev, isDownloadingPng: false } : null));
+    }
+  };
+
+  const handleOpenVideoModal = async (
+    d: DeliverableData,
+    targetBlockIndex?: number,
+    customText?: string,
+    ratio: '16:9' | '9:16' | '1:1' | '4:3' = '16:9',
+    theme: string = 'cyber_dark',
+    font: 'sans' | 'serif' | 'mono' = 'sans',
+    motionStyle: 'kinetic' | 'tactical' | 'editorial' | 'minimal' = 'kinetic',
+    brandName: string = 'AIZ INTELLIGENCE',
+    classification?: string,
+    durationSeconds: number = 7.0
+  ) => {
+    const isMultiPart =
+      d.deliverable_type === 'twitter_thread' ||
+      (d.content?.blocks && d.content.blocks.length > 1);
+
+    const isThread = isMultiPart && targetBlockIndex === undefined && !customText;
+    const defaultClass = classification || (isThread ? 'TACTICAL THREAD' : 'VERIFIED CLAIM');
+
+    setVideoStudio({
+      videoId: '',
+      title: d.content?.title || 'HyperFrames Video',
+      postText: customText || '',
+      deliverableType: d.deliverable_type,
+      aspectRatio: ratio,
+      theme: theme,
+      fontFamily: font,
+      motionStyle: motionStyle,
+      brandName: brandName,
+      classification: defaultClass,
+      durationSeconds: isThread ? 5.0 : durationSeconds,
+      previewUrl: '',
+      mp4ExportUrl: '',
+      isLoading: true,
+      isExportingMp4: false,
+      error: null,
+      chapters: [],
+      isThreadSequence: isThread,
+    });
+
+    try {
+      if (isThread) {
+        const res = await fetch('/api/v1/video/generate-thread-video', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            output_id: d.output_id,
+            doc_id: d.doc_id,
+            deliverable_type: d.deliverable_type,
+            title: d.content?.title,
+            blocks: d.content?.blocks,
+            aspect_ratio: ratio,
+            theme: theme,
+            font_family: font,
+            motion_style: motionStyle,
+            brand_name: brandName,
+            classification: defaultClass,
+            seconds_per_post: 5.0,
+          }),
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => null);
+          throw new Error(err?.detail || `HTTP ${res.status}`);
+        }
+
+        const data = await res.json();
+        setVideoStudio({
+          videoId: data.video_id,
+          title: data.title,
+          postText: '',
+          deliverableType: d.deliverable_type,
+          aspectRatio: ratio,
+          theme: theme,
+          fontFamily: font,
+          motionStyle: motionStyle,
+          brandName: brandName,
+          classification: defaultClass,
+          durationSeconds: data.duration_seconds,
+          previewUrl: data.preview_url,
+          mp4ExportUrl: data.mp4_export_url,
+          isLoading: false,
+          isExportingMp4: false,
+          error: null,
+          chapters: data.chapters || [],
+          isThreadSequence: true,
+        });
+      } else {
+        let textToPost = customText;
+        if (!textToPost) {
+          if (targetBlockIndex !== undefined && d.content?.blocks?.[targetBlockIndex]) {
+            textToPost =
+              d.content.blocks[targetBlockIndex].sentences
+                ?.map((s) => s.text)
+                .filter(Boolean)
+                .join(' ') || '';
+          } else {
+            const parts: string[] = [];
+            if (d.content?.blocks) {
+              for (const b of d.content.blocks) {
+                const sents = b.sentences?.map((s) => s.text).filter(Boolean) || [];
+                if (sents.length > 0) parts.push(sents.join(' '));
+              }
+            }
+            textToPost = parts.join('\n\n') || d.content?.summary || d.content?.title || '';
+          }
+        }
+
+        const res = await fetch('/api/v1/video/generate-post-video', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            output_id: d.output_id,
+            doc_id: d.doc_id,
+            deliverable_type: d.deliverable_type,
+            title: d.content?.title,
+            post_text: textToPost,
+            aspect_ratio: ratio,
+            theme: theme,
+            font_family: font,
+            motion_style: motionStyle,
+            brand_name: brandName,
+            classification: defaultClass,
+            duration_seconds: durationSeconds,
+          }),
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => null);
+          throw new Error(err?.detail || `HTTP ${res.status}`);
+        }
+
+        const data = await res.json();
+        setVideoStudio({
+          videoId: data.video_id,
+          title: data.title,
+          postText: textToPost,
+          deliverableType: d.deliverable_type,
+          aspectRatio: ratio,
+          theme: theme,
+          fontFamily: font,
+          motionStyle: motionStyle,
+          brandName: brandName,
+          classification: defaultClass,
+          durationSeconds: data.duration_seconds,
+          previewUrl: data.preview_url,
+          mp4ExportUrl: data.mp4_export_url,
+          isLoading: false,
+          isExportingMp4: false,
+          error: null,
+          chapters: [],
+          isThreadSequence: false,
+        });
+      }
+    } catch (err: any) {
+      setVideoStudio((prev) =>
+        prev
+          ? {
+              ...prev,
+              isLoading: false,
+              error: err.message || 'Failed to compile HyperFrames video',
+            }
+          : null
+      );
+    }
+  };
+
+  const handleUpdateVideo = async (updates: {
+    ratio?: '16:9' | '9:16' | '1:1' | '4:3';
+    theme?: string;
+    fontFamily?: 'sans' | 'serif' | 'mono';
+    motionStyle?: 'kinetic' | 'tactical' | 'editorial' | 'minimal';
+    brandName?: string;
+    classification?: string;
+    durationSeconds?: number;
+    text?: string;
+    title?: string;
+  }) => {
+    if (!videoStudio || !selectedDeliverable) return;
+    const ratio = updates.ratio || videoStudio.aspectRatio;
+    const theme = updates.theme || videoStudio.theme;
+    const font = updates.fontFamily || videoStudio.fontFamily;
+    const motion = updates.motionStyle || videoStudio.motionStyle;
+    const brand = updates.brandName !== undefined ? updates.brandName : videoStudio.brandName;
+    const classification = updates.classification !== undefined ? updates.classification : videoStudio.classification;
+    const duration = updates.durationSeconds !== undefined ? updates.durationSeconds : videoStudio.durationSeconds;
+    const text = updates.text !== undefined ? updates.text : videoStudio.postText;
+    const title = updates.title !== undefined ? updates.title : videoStudio.title;
+
+    setVideoStudio((prev) =>
+      prev
+        ? {
+            ...prev,
+            aspectRatio: ratio,
+            theme,
+            fontFamily: font,
+            motionStyle: motion,
+            brandName: brand,
+            classification,
+            durationSeconds: duration,
+            postText: text,
+            title,
+            isLoading: true,
+            error: null,
+          }
+        : null
+    );
+
+    try {
+      if (videoStudio.isThreadSequence) {
+        const res = await fetch('/api/v1/video/generate-thread-video', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            output_id: selectedDeliverable.output_id,
+            doc_id: selectedDeliverable.doc_id,
+            deliverable_type: videoStudio.deliverableType,
+            title: title,
+            blocks: selectedDeliverable.content?.blocks,
+            aspect_ratio: ratio,
+            theme: theme,
+            font_family: font,
+            motion_style: motion,
+            brand_name: brand,
+            classification: classification,
+            seconds_per_post: duration,
+          }),
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => null);
+          throw new Error(err?.detail || `HTTP ${res.status}`);
+        }
+
+        const data = await res.json();
+        setVideoStudio((prev) =>
+          prev
+            ? {
+                ...prev,
+                videoId: data.video_id,
+                previewUrl: data.preview_url,
+                mp4ExportUrl: data.mp4_export_url,
+                durationSeconds: data.duration_seconds,
+                chapters: data.chapters || [],
+                isLoading: false,
+              }
+            : null
+        );
+      } else {
+        const res = await fetch('/api/v1/video/generate-post-video', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            output_id: selectedDeliverable.output_id,
+            doc_id: selectedDeliverable.doc_id,
+            deliverable_type: videoStudio.deliverableType,
+            title: title,
+            post_text: text,
+            aspect_ratio: ratio,
+            theme: theme,
+            font_family: font,
+            motion_style: motion,
+            brand_name: brand,
+            classification: classification,
+            duration_seconds: duration,
+          }),
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => null);
+          throw new Error(err?.detail || `HTTP ${res.status}`);
+        }
+
+        const data = await res.json();
+        setVideoStudio((prev) =>
+          prev
+            ? {
+                ...prev,
+                videoId: data.video_id,
+                previewUrl: data.preview_url,
+                mp4ExportUrl: data.mp4_export_url,
+                durationSeconds: data.duration_seconds,
+                isLoading: false,
+              }
+            : null
+        );
+      }
+    } catch (err: any) {
+      setVideoStudio((prev) =>
+        prev ? { ...prev, isLoading: false, error: err.message || 'Failed to update video' } : null
+      );
+    }
+  };
+
+  const handleExportMP4 = async () => {
+    if (!videoStudio) return;
+    setVideoStudio((prev) => (prev ? { ...prev, isExportingMp4: true } : null));
+    try {
+      const res = await fetch(videoStudio.mp4ExportUrl);
+      if (!res.ok) throw new Error('Video MP4 export request failed');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const cleanTitle = (videoStudio.title || 'hyperframes_video').toLowerCase().replace(/[^a-z0-9]+/g, '_');
+      a.download = `${cleanTitle}.mp4`;
+      document.body.appendChild(a);
+      a.click();
+      URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      onToast({ type: 'success', text: 'Rendered & downloaded H.264 MP4 video via Playwright & local FFmpeg!' });
+    } catch (err: any) {
+      onToast({ type: 'alert', text: 'MP4 export failed: ' + err.message });
+    } finally {
+      setVideoStudio((prev) => (prev ? { ...prev, isExportingMp4: false } : null));
+    }
+  };
+
   // Filtered deliverables list
   const filteredDeliverables = deliverables.filter((d) => {
     if (statusFilter !== 'all' && d.status !== statusFilter) return false;
@@ -594,8 +1325,32 @@ export const HumanReviewWorkspace: React.FC<HumanReviewWorkspaceProps> = ({
                     </h2>
                   </div>
 
-                  {/* Export Controls */}
+                  {/* Export & Visual Card Controls */}
                   <div className="flex items-center space-x-2 shrink-0">
+                    <button
+                      onClick={() => handleOpenPostCardModal(selectedDeliverable)}
+                      className="px-3 py-1.5 rounded bg-gradient-to-r from-[#0284c7] to-[#0ea5e9] hover:from-[#0369a1] hover:to-[#0284c7] text-white flex items-center space-x-1.5 transition shadow-soft font-mono font-medium text-xs cursor-pointer"
+                      title="Generate pixel-perfect visual cards for each post/tweet in sequence"
+                    >
+                      <span>
+                        {selectedDeliverable.content.blocks && selectedDeliverable.content.blocks.length > 1
+                          ? `📸 Thread Visual Studio (${selectedDeliverable.content.blocks.length} Cards)`
+                          : '📸 Post Visual Card'}
+                      </span>
+                    </button>
+
+                    <button
+                      onClick={() => handleOpenVideoModal(selectedDeliverable)}
+                      className="px-3 py-1.5 rounded bg-gradient-to-r from-[#6366f1] to-[#8b5cf6] hover:from-[#4f46e5] hover:to-[#7c3aed] text-white flex items-center space-x-1.5 transition shadow-soft font-mono font-medium text-xs cursor-pointer"
+                      title="Generate seekable HyperFrames video with kinetic motion and export H.264 MP4"
+                    >
+                      <span>
+                        {selectedDeliverable.content.blocks && selectedDeliverable.content.blocks.length > 1
+                          ? `🎬 Thread Video Studio (${selectedDeliverable.content.blocks.length} Scenes)`
+                          : '🎬 Generate Video (MP4)'}
+                      </span>
+                    </button>
+
                     <select
                       value={exportFormat}
                       onChange={(e) => setExportFormat(e.target.value)}
@@ -777,11 +1532,29 @@ export const HumanReviewWorkspace: React.FC<HumanReviewWorkspaceProps> = ({
                 <div className="space-y-3">
                   {selectedDeliverable.content.blocks.map((block) => (
                     <div key={block.block_index} className="space-y-2">
-                      {block.title && (
-                        <h4 className="text-xs font-mono font-semibold text-[#6F6D68] uppercase tracking-wider pt-1">
-                          {block.title}
-                        </h4>
-                      )}
+                      <div className="flex items-center justify-between pt-1">
+                        {block.title && (
+                          <h4 className="text-xs font-mono font-semibold text-[#6F6D68] uppercase tracking-wider">
+                            {block.title}
+                          </h4>
+                        )}
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={() => handleOpenPostCardModal(selectedDeliverable, block.block_index)}
+                            className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 border border-blue-200 transition cursor-pointer"
+                            title={`Generate Visual Card specifically for ${block.title || `Block ${block.block_index + 1}`}`}
+                          >
+                            <span>📸 Visual Card</span>
+                          </button>
+                          <button
+                            onClick={() => handleOpenVideoModal(selectedDeliverable, block.block_index)}
+                            className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-medium text-purple-600 bg-purple-50 hover:bg-purple-100 border border-purple-200 transition cursor-pointer"
+                            title={`Generate Video specifically for ${block.title || `Block ${block.block_index + 1}`}`}
+                          >
+                            <span>🎬 Video</span>
+                          </button>
+                        </div>
+                      </div>
 
                       <div className="space-y-2">
                         {block.sentences.map((sentence) => {
@@ -966,6 +1739,37 @@ export const HumanReviewWorkspace: React.FC<HumanReviewWorkspaceProps> = ({
           )}
         </div>
       </div>
+
+      {/* DEDICATED POST VISUAL CARD STUDIO MODAL */}
+      <PostVisualCardStudioModal
+        studio={postCardStudio}
+        onClose={() => setPostCardStudio(null)}
+        onSelectCardIndex={handleSelectCardIndex}
+        onUpdateOptions={async (opts) => {
+          await handleUpdatePostCard(
+            opts.ratio,
+            opts.theme,
+            opts.text,
+            opts.title,
+            opts.fontFamily,
+            opts.layoutPreset,
+            opts.brandName,
+            opts.classification
+          );
+        }}
+        onDownloadSinglePNG={handleDownloadPostPNG}
+        onDownloadAllPNGs={handleDownloadAllThreadPNGs}
+      />
+
+      {/* DEDICATED HYPERFRAMES VIDEO STUDIO MODAL */}
+      <HyperFramesVideoStudioModal
+        studio={videoStudio}
+        onClose={() => setVideoStudio(null)}
+        onUpdateOptions={async (opts) => {
+          await handleUpdateVideo(opts);
+        }}
+        onExportMP4={handleExportMP4}
+      />
     </div>
   );
 };

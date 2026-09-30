@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { KnowledgeGraphVisualizer, GraphNodeData, GraphEdgeData } from './KnowledgeGraphVisualizer';
 import { HumanReviewWorkspace } from './HumanReviewWorkspace';
+import { PostVisualCardStudioModal, PostCardStudioState } from './PostVisualCardStudioModal';
+import { HyperFramesVideoStudioModal, VideoStudioState } from './HyperFramesVideoStudioModal';
 
 interface StructuralMetadata {
   parser?: string;
@@ -320,6 +322,14 @@ export const BlankDashboard: React.FC = () => {
   const [exportFormat, setExportFormat] = useState<string>('markdown');
   const [isExporting, setIsExporting] = useState<boolean>(false);
   const [rightViewMode, setRightViewMode] = useState<'deliverables' | 'chunks'>('deliverables');
+  const [infographicModalOutputId, setInfographicModalOutputId] = useState<string | null>(null);
+  const [infographicTheme, setInfographicTheme] = useState<'dark' | 'light'>('dark');
+
+  // Dedicated Post Visual Card Studio State
+  const [postCardStudio, setPostCardStudio] = useState<PostCardStudioState | null>(null);
+
+  // Dedicated HyperFrames Video Studio State
+  const [videoStudio, setVideoStudio] = useState<VideoStudioState | null>(null);
 
   // Provenance / Trace
   const [sentenceTrace, setSentenceTrace] = useState<SentenceTraceResponse | null>(null);
@@ -711,6 +721,73 @@ export const BlankDashboard: React.FC = () => {
     }
   };
 
+  const handleGenerateInfographicDirectly = async () => {
+    if (!latestDoc) {
+      setToastMessage({ type: 'alert', text: 'Select or upload source material first (or click a Sample document).' });
+      return;
+    }
+    if (!selectedFormats.includes('infographic')) {
+      setSelectedFormats((prev) => [...prev, 'infographic']);
+    }
+    setIsGenerating(true);
+    try {
+      if (chunks.length === 0) {
+        try {
+          await handleProcessSource();
+        } catch {}
+      }
+
+      const payload = {
+        doc_id: latestDoc.doc_id,
+        deliverable_types: ['infographic'],
+        parameters: {
+          audience: targetAudience || 'Defense & Technical Leadership',
+          tone: targetTone || 'analytical',
+          language: targetLanguage || 'en',
+          detail_level: detailLevel || 'detailed',
+          objective: targetObjective || 'Strategic Operational Directive',
+          style: targetStyle || 'standard',
+        },
+        actor: 'operator_primary',
+      };
+
+      const res = await fetch('/api/v1/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => null);
+        throw new Error(errJson?.detail?.message || errJson?.detail || 'Infographic generation failed');
+      }
+
+      const data = await res.json();
+      setDeliverables((prev) => {
+        const others = prev.filter((d) => d.deliverable_type !== 'infographic');
+        return [...data.deliverables, ...others];
+      });
+      if (data.deliverables.length > 0) {
+        const infoDeliv = data.deliverables[0];
+        setSelectedDeliverable(infoDeliv);
+        setRightViewMode('deliverables');
+        setInfographicModalOutputId(infoDeliv.output_id);
+      }
+      fetchAuditLogs();
+      setToastMessage({
+        type: 'success',
+        text: 'AIZ-Infographic compiled with 100% claim-to-chunk provenance!',
+      });
+    } catch (err) {
+      setToastMessage({
+        type: 'alert',
+        text: `Infographic generation error: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
   const handleGenerate = async () => {
     if (!latestDoc) {
       setToastMessage({ type: 'alert', text: 'Select or upload source material first.' });
@@ -787,6 +864,729 @@ export const BlankDashboard: React.FC = () => {
       console.error('Trace error:', err);
     } finally {
       setIsTracing(false);
+    }
+  };
+
+  const handleOpenPostCardModal = async (
+    d: DeliverableResponse,
+    targetBlockIndex?: number,
+    customText?: string,
+    ratio: '16:9' | '1:1' | '4:3' | '9:16' = '16:9',
+    theme: string = 'cyber_dark',
+    font: 'sans' | 'serif' | 'mono' = 'sans',
+    layout: 'auto' | 'hero' | 'split' | 'technical' | 'minimal' = 'auto',
+    brandName: string = 'AIZ INTELLIGENCE',
+    classification: string = 'VERIFIED CLAIM'
+  ) => {
+    const isMultiPart =
+      d.deliverable_type === 'twitter_thread' ||
+      (d.content?.blocks && d.content.blocks.length > 1);
+
+    setPostCardStudio({
+      cardId: '',
+      title: d.content?.title || 'Post Visual Card',
+      postText: customText || '',
+      deliverableType: d.deliverable_type,
+      aspectRatio: ratio,
+      theme: theme,
+      fontFamily: font,
+      layoutPreset: layout,
+      brandName: brandName,
+      classification: classification,
+      previewUrl: '',
+      pngDownloadUrl: '',
+      isLoading: true,
+      isDownloadingPng: false,
+      error: null,
+      cards: [],
+      activeCardIndex: targetBlockIndex ?? 0,
+    });
+
+    try {
+      if (isMultiPart && !customText) {
+        // Generate thread cards for every tweet/post in the sequence
+        const res = await fetch('/api/v1/infographics/generate-thread-cards', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            output_id: d.output_id,
+            doc_id: latestDoc?.doc_id || d.doc_id,
+            deliverable_type: d.deliverable_type,
+            title: d.content?.title,
+            blocks: d.content?.blocks,
+            aspect_ratio: ratio,
+            theme: theme,
+            font_family: font,
+            layout_preset: layout,
+            brand_name: brandName,
+            classification: classification,
+          }),
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => null);
+          throw new Error(err?.detail || `HTTP ${res.status}`);
+        }
+
+        const data = await res.json();
+        const cards = data.cards || [];
+        const activeIdx =
+          targetBlockIndex !== undefined && targetBlockIndex < cards.length
+            ? targetBlockIndex
+            : 0;
+        const activeCard = cards[activeIdx] || cards[0];
+
+        setPostCardStudio({
+          cardId: activeCard?.card_id || '',
+          title: activeCard?.title || d.content?.title || 'Post Visual Card',
+          postText: activeCard?.post_text || '',
+          deliverableType: d.deliverable_type,
+          aspectRatio: ratio,
+          theme: theme,
+          fontFamily: font,
+          layoutPreset: layout,
+          brandName: brandName,
+          classification: classification,
+          previewUrl: activeCard?.preview_url || '',
+          pngDownloadUrl: activeCard?.png_download_url || '',
+          isLoading: false,
+          isDownloadingPng: false,
+          error: null,
+          cards: cards,
+          activeCardIndex: activeIdx,
+        });
+      } else {
+        // Single post mode
+        let textToPost = customText;
+        if (!textToPost) {
+          if (targetBlockIndex !== undefined && d.content?.blocks?.[targetBlockIndex]) {
+            textToPost =
+              d.content.blocks[targetBlockIndex].sentences
+                ?.map((s) => s.text)
+                .filter(Boolean)
+                .join(' ') || '';
+          } else {
+            const parts: string[] = [];
+            if (d.content?.blocks) {
+              for (const b of d.content.blocks) {
+                const sents = b.sentences?.map((s) => s.text).filter(Boolean) || [];
+                if (sents.length > 0) parts.push(sents.join(' '));
+              }
+            }
+            textToPost = parts.join('\n\n') || d.content?.summary || d.content?.title || '';
+          }
+        }
+
+        const res = await fetch('/api/v1/infographics/generate-post-card', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            output_id: d.output_id,
+            doc_id: latestDoc?.doc_id || d.doc_id,
+            deliverable_type: d.deliverable_type,
+            title: d.content?.title,
+            post_text: textToPost,
+            aspect_ratio: ratio,
+            theme: theme,
+            font_family: font,
+            layout_preset: layout,
+            brand_name: brandName,
+            classification: classification,
+          }),
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => null);
+          throw new Error(err?.detail || `HTTP ${res.status}`);
+        }
+
+        const data = await res.json();
+        const singleItem = {
+          card_id: data.card_id,
+          title: data.title,
+          post_text: textToPost || '',
+          sequence_index: 1,
+          sequence_total: 1,
+          sequence_label: 'Single Card',
+          preview_url: data.preview_url,
+          png_download_url: data.png_download_url,
+          aspect_ratio: ratio,
+          theme: theme,
+          font_family: font,
+          layout_preset: layout,
+          brand_name: brandName,
+          classification: classification,
+        };
+
+        setPostCardStudio({
+          cardId: data.card_id,
+          title: data.title,
+          postText: textToPost || '',
+          deliverableType: d.deliverable_type,
+          aspectRatio: ratio,
+          theme: theme,
+          fontFamily: font,
+          layoutPreset: layout,
+          brandName: brandName,
+          classification: classification,
+          previewUrl: data.preview_url,
+          pngDownloadUrl: data.png_download_url,
+          isLoading: false,
+          isDownloadingPng: false,
+          error: null,
+          cards: [singleItem],
+          activeCardIndex: 0,
+        });
+      }
+    } catch (err: any) {
+      setPostCardStudio((prev) =>
+        prev
+          ? {
+              ...prev,
+              isLoading: false,
+              error: err.message || 'Failed to compile post visual card',
+            }
+          : null
+      );
+    }
+  };
+
+  const handleSelectCardIndex = (idx: number) => {
+    if (!postCardStudio || !postCardStudio.cards[idx]) return;
+    const target = postCardStudio.cards[idx];
+    setPostCardStudio((prev) =>
+      prev
+        ? {
+            ...prev,
+            activeCardIndex: idx,
+            cardId: target.card_id,
+            title: target.title,
+            postText: target.post_text,
+            previewUrl: target.preview_url,
+            pngDownloadUrl: target.png_download_url,
+          }
+        : null
+    );
+  };
+
+  const handleUpdatePostCard = async (
+    newRatio?: '16:9' | '1:1' | '4:3' | '9:16',
+    newTheme?: string,
+    newText?: string,
+    newTitle?: string,
+    newFont?: 'sans' | 'serif' | 'mono',
+    newLayout?: 'auto' | 'hero' | 'split' | 'technical' | 'minimal',
+    newBrand?: string,
+    newClassification?: string
+  ) => {
+    if (!postCardStudio || !selectedDeliverable) return;
+    const ratio = newRatio || postCardStudio.aspectRatio;
+    const theme = newTheme || postCardStudio.theme;
+    const font = newFont || postCardStudio.fontFamily;
+    const layout = newLayout || postCardStudio.layoutPreset;
+    const brand = newBrand !== undefined ? newBrand : postCardStudio.brandName;
+    const classification = newClassification !== undefined ? newClassification : postCardStudio.classification;
+    const text = newText !== undefined ? newText : postCardStudio.postText;
+    const title = newTitle !== undefined ? newTitle : postCardStudio.title;
+
+    setPostCardStudio((prev) =>
+      prev
+        ? {
+            ...prev,
+            aspectRatio: ratio,
+            theme,
+            fontFamily: font,
+            layoutPreset: layout,
+            brandName: brand,
+            classification,
+            postText: text,
+            title,
+            isLoading: true,
+            error: null,
+          }
+        : null
+    );
+
+    try {
+      const isMultiCard = postCardStudio.cards.length > 1;
+      const isStyleOnlyChange =
+        isMultiCard &&
+        newText === undefined &&
+        (newRatio !== undefined ||
+          newTheme !== undefined ||
+          newFont !== undefined ||
+          newLayout !== undefined ||
+          newBrand !== undefined ||
+          newClassification !== undefined);
+
+      if (isStyleOnlyChange) {
+        // Re-generate the entire thread with the new styling!
+        const res = await fetch('/api/v1/infographics/generate-thread-cards', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            output_id: selectedDeliverable.output_id,
+            doc_id: latestDoc?.doc_id || selectedDeliverable.doc_id,
+            deliverable_type: postCardStudio.deliverableType,
+            title: title,
+            blocks: selectedDeliverable.content?.blocks,
+            aspect_ratio: ratio,
+            theme: theme,
+            font_family: font,
+            layout_preset: layout,
+            brand_name: brand,
+            classification: classification,
+          }),
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => null);
+          throw new Error(err?.detail || `HTTP ${res.status}`);
+        }
+
+        const data = await res.json();
+        const cards = data.cards || [];
+        const activeIdx = Math.min(postCardStudio.activeCardIndex, Math.max(0, cards.length - 1));
+        const activeCard = cards[activeIdx] || cards[0];
+
+        setPostCardStudio((prev) =>
+          prev
+            ? {
+                ...prev,
+                cardId: activeCard?.card_id || prev.cardId,
+                previewUrl: activeCard?.preview_url || prev.previewUrl,
+                pngDownloadUrl: activeCard?.png_download_url || prev.pngDownloadUrl,
+                cards,
+                isLoading: false,
+              }
+            : null
+        );
+      } else {
+        // Single card update
+        const res = await fetch('/api/v1/infographics/generate-post-card', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            output_id: selectedDeliverable.output_id,
+            doc_id: latestDoc?.doc_id || selectedDeliverable.doc_id,
+            deliverable_type: postCardStudio.deliverableType,
+            title: title,
+            post_text: text,
+            aspect_ratio: ratio,
+            theme: theme,
+            font_family: font,
+            layout_preset: layout,
+            brand_name: brand,
+            classification: classification,
+          }),
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => null);
+          throw new Error(err?.detail || `HTTP ${res.status}`);
+        }
+
+        const data = await res.json();
+        setPostCardStudio((prev) => {
+          if (!prev) return null;
+          const updatedCards = [...prev.cards];
+          if (updatedCards[prev.activeCardIndex]) {
+            updatedCards[prev.activeCardIndex] = {
+              ...updatedCards[prev.activeCardIndex],
+              card_id: data.card_id,
+              title: data.title,
+              post_text: text,
+              preview_url: data.preview_url,
+              png_download_url: data.png_download_url,
+              aspect_ratio: ratio,
+              theme: theme,
+              font_family: font,
+              layout_preset: layout,
+              brand_name: brand,
+              classification: classification,
+            };
+          }
+          return {
+            ...prev,
+            cardId: data.card_id,
+            previewUrl: data.preview_url,
+            pngDownloadUrl: data.png_download_url,
+            cards: updatedCards,
+            isLoading: false,
+          };
+        });
+      }
+    } catch (err: any) {
+      setPostCardStudio((prev) => (prev ? { ...prev, isLoading: false, error: err.message } : null));
+    }
+  };
+
+  const handleDownloadPostPNG = async () => {
+    if (!postCardStudio) return;
+    setPostCardStudio((prev) => (prev ? { ...prev, isDownloadingPng: true } : null));
+    try {
+      const res = await fetch(postCardStudio.pngDownloadUrl);
+      if (!res.ok) throw new Error('Download request failed');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const cleanTitle = (postCardStudio.title || 'post').toLowerCase().replace(/[^a-z0-9]+/g, '_');
+      a.download = `${cleanTitle}_card.png`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setToastMessage({ type: 'success', text: 'Downloaded 2x retina PNG for this post card!' });
+    } catch (err: any) {
+      setToastMessage({ type: 'alert', text: 'PNG download failed: ' + err.message });
+    } finally {
+      setPostCardStudio((prev) => (prev ? { ...prev, isDownloadingPng: false } : null));
+    }
+  };
+
+  const handleDownloadAllThreadPNGs = async () => {
+    if (!postCardStudio || !postCardStudio.cards.length) return;
+    setPostCardStudio((prev) => (prev ? { ...prev, isDownloadingPng: true } : null));
+
+    try {
+      for (let i = 0; i < postCardStudio.cards.length; i++) {
+        const c = postCardStudio.cards[i];
+        const res = await fetch(c.png_download_url);
+        if (!res.ok) throw new Error(`Failed to download ${c.sequence_label}`);
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const cleanTitle = (c.title || 'post').toLowerCase().replace(/[^a-z0-9]+/g, '_');
+        a.download = `${cleanTitle}_part_${c.sequence_index}_of_${c.sequence_total}.png`;
+        document.body.appendChild(a);
+        a.click();
+        URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        await new Promise((r) => setTimeout(r, 250));
+      }
+      setToastMessage({ type: 'success', text: `Downloaded all ${postCardStudio.cards.length} thread cards as PNGs!` });
+    } catch (err: any) {
+      setToastMessage({ type: 'alert', text: `Batch PNG download failed: ${err.message}` });
+    } finally {
+      setPostCardStudio((prev) => (prev ? { ...prev, isDownloadingPng: false } : null));
+    }
+  };
+
+  const handleOpenVideoModal = async (
+    d: DeliverableResponse,
+    targetBlockIndex?: number,
+    customText?: string,
+    ratio: '16:9' | '9:16' | '1:1' | '4:3' = '16:9',
+    theme: string = 'cyber_dark',
+    font: 'sans' | 'serif' | 'mono' = 'sans',
+    motionStyle: 'kinetic' | 'tactical' | 'editorial' | 'minimal' = 'kinetic',
+    brandName: string = 'AIZ INTELLIGENCE',
+    classification?: string,
+    durationSeconds: number = 7.0
+  ) => {
+    const isMultiPart =
+      d.deliverable_type === 'twitter_thread' ||
+      (d.content?.blocks && d.content.blocks.length > 1);
+
+    const isThread = isMultiPart && targetBlockIndex === undefined && !customText;
+    const defaultClass = classification || (isThread ? 'TACTICAL THREAD' : 'VERIFIED CLAIM');
+
+    setVideoStudio({
+      videoId: '',
+      title: d.content?.title || 'HyperFrames Video',
+      postText: customText || '',
+      deliverableType: d.deliverable_type,
+      aspectRatio: ratio,
+      theme: theme,
+      fontFamily: font,
+      motionStyle: motionStyle,
+      brandName: brandName,
+      classification: defaultClass,
+      durationSeconds: isThread ? 5.0 : durationSeconds,
+      previewUrl: '',
+      mp4ExportUrl: '',
+      isLoading: true,
+      isExportingMp4: false,
+      error: null,
+      chapters: [],
+      isThreadSequence: isThread,
+    });
+
+    try {
+      if (isThread) {
+        const res = await fetch('/api/v1/video/generate-thread-video', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            output_id: d.output_id,
+            doc_id: latestDoc?.doc_id || d.doc_id,
+            deliverable_type: d.deliverable_type,
+            title: d.content?.title,
+            blocks: d.content?.blocks,
+            aspect_ratio: ratio,
+            theme: theme,
+            font_family: font,
+            motion_style: motionStyle,
+            brand_name: brandName,
+            classification: defaultClass,
+            seconds_per_post: 5.0,
+          }),
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => null);
+          throw new Error(err?.detail || `HTTP ${res.status}`);
+        }
+
+        const data = await res.json();
+        setVideoStudio({
+          videoId: data.video_id,
+          title: data.title,
+          postText: '',
+          deliverableType: d.deliverable_type,
+          aspectRatio: ratio,
+          theme: theme,
+          fontFamily: font,
+          motionStyle: motionStyle,
+          brandName: brandName,
+          classification: defaultClass,
+          durationSeconds: data.duration_seconds,
+          previewUrl: data.preview_url,
+          mp4ExportUrl: data.mp4_export_url,
+          isLoading: false,
+          isExportingMp4: false,
+          error: null,
+          chapters: data.chapters || [],
+          isThreadSequence: true,
+        });
+      } else {
+        let textToPost = customText;
+        if (!textToPost) {
+          if (targetBlockIndex !== undefined && d.content?.blocks?.[targetBlockIndex]) {
+            textToPost =
+              d.content.blocks[targetBlockIndex].sentences
+                ?.map((s) => s.text)
+                .filter(Boolean)
+                .join(' ') || '';
+          } else {
+            const parts: string[] = [];
+            if (d.content?.blocks) {
+              for (const b of d.content.blocks) {
+                const sents = b.sentences?.map((s) => s.text).filter(Boolean) || [];
+                if (sents.length > 0) parts.push(sents.join(' '));
+              }
+            }
+            textToPost = parts.join('\n\n') || d.content?.summary || d.content?.title || '';
+          }
+        }
+
+        const res = await fetch('/api/v1/video/generate-post-video', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            output_id: d.output_id,
+            doc_id: latestDoc?.doc_id || d.doc_id,
+            deliverable_type: d.deliverable_type,
+            title: d.content?.title,
+            post_text: textToPost,
+            aspect_ratio: ratio,
+            theme: theme,
+            font_family: font,
+            motion_style: motionStyle,
+            brand_name: brandName,
+            classification: defaultClass,
+            duration_seconds: durationSeconds,
+          }),
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => null);
+          throw new Error(err?.detail || `HTTP ${res.status}`);
+        }
+
+        const data = await res.json();
+        setVideoStudio({
+          videoId: data.video_id,
+          title: data.title,
+          postText: textToPost,
+          deliverableType: d.deliverable_type,
+          aspectRatio: ratio,
+          theme: theme,
+          fontFamily: font,
+          motionStyle: motionStyle,
+          brandName: brandName,
+          classification: defaultClass,
+          durationSeconds: data.duration_seconds,
+          previewUrl: data.preview_url,
+          mp4ExportUrl: data.mp4_export_url,
+          isLoading: false,
+          isExportingMp4: false,
+          error: null,
+          chapters: [],
+          isThreadSequence: false,
+        });
+      }
+    } catch (err: any) {
+      setVideoStudio((prev) =>
+        prev
+          ? {
+              ...prev,
+              isLoading: false,
+              error: err.message || 'Failed to compile HyperFrames video',
+            }
+          : null
+      );
+    }
+  };
+
+  const handleUpdateVideo = async (updates: {
+    ratio?: '16:9' | '9:16' | '1:1' | '4:3';
+    theme?: string;
+    fontFamily?: 'sans' | 'serif' | 'mono';
+    motionStyle?: 'kinetic' | 'tactical' | 'editorial' | 'minimal';
+    brandName?: string;
+    classification?: string;
+    durationSeconds?: number;
+    text?: string;
+    title?: string;
+  }) => {
+    if (!videoStudio || !selectedDeliverable) return;
+    const ratio = updates.ratio || videoStudio.aspectRatio;
+    const theme = updates.theme || videoStudio.theme;
+    const font = updates.fontFamily || videoStudio.fontFamily;
+    const motion = updates.motionStyle || videoStudio.motionStyle;
+    const brand = updates.brandName !== undefined ? updates.brandName : videoStudio.brandName;
+    const classification = updates.classification !== undefined ? updates.classification : videoStudio.classification;
+    const duration = updates.durationSeconds !== undefined ? updates.durationSeconds : videoStudio.durationSeconds;
+    const text = updates.text !== undefined ? updates.text : videoStudio.postText;
+    const title = updates.title !== undefined ? updates.title : videoStudio.title;
+
+    setVideoStudio((prev) =>
+      prev
+        ? {
+            ...prev,
+            aspectRatio: ratio,
+            theme,
+            fontFamily: font,
+            motionStyle: motion,
+            brandName: brand,
+            classification,
+            durationSeconds: duration,
+            postText: text,
+            title,
+            isLoading: true,
+            error: null,
+          }
+        : null
+    );
+
+    try {
+      if (videoStudio.isThreadSequence) {
+        const res = await fetch('/api/v1/video/generate-thread-video', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            output_id: selectedDeliverable.output_id,
+            doc_id: latestDoc?.doc_id || selectedDeliverable.doc_id,
+            deliverable_type: videoStudio.deliverableType,
+            title: title,
+            blocks: selectedDeliverable.content?.blocks,
+            aspect_ratio: ratio,
+            theme: theme,
+            font_family: font,
+            motion_style: motion,
+            brand_name: brand,
+            classification: classification,
+            seconds_per_post: duration,
+          }),
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => null);
+          throw new Error(err?.detail || `HTTP ${res.status}`);
+        }
+
+        const data = await res.json();
+        setVideoStudio((prev) =>
+          prev
+            ? {
+                ...prev,
+                videoId: data.video_id,
+                previewUrl: data.preview_url,
+                mp4ExportUrl: data.mp4_export_url,
+                durationSeconds: data.duration_seconds,
+                chapters: data.chapters || [],
+                isLoading: false,
+              }
+            : null
+        );
+      } else {
+        const res = await fetch('/api/v1/video/generate-post-video', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            output_id: selectedDeliverable.output_id,
+            doc_id: latestDoc?.doc_id || selectedDeliverable.doc_id,
+            deliverable_type: videoStudio.deliverableType,
+            title: title,
+            post_text: text,
+            aspect_ratio: ratio,
+            theme: theme,
+            font_family: font,
+            motion_style: motion,
+            brand_name: brand,
+            classification: classification,
+            duration_seconds: duration,
+          }),
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => null);
+          throw new Error(err?.detail || `HTTP ${res.status}`);
+        }
+
+        const data = await res.json();
+        setVideoStudio((prev) =>
+          prev
+            ? {
+                ...prev,
+                videoId: data.video_id,
+                previewUrl: data.preview_url,
+                mp4ExportUrl: data.mp4_export_url,
+                durationSeconds: data.duration_seconds,
+                isLoading: false,
+              }
+            : null
+        );
+      }
+    } catch (err: any) {
+      setVideoStudio((prev) =>
+        prev ? { ...prev, isLoading: false, error: err.message || 'Failed to update video' } : null
+      );
+    }
+  };
+
+  const handleExportMP4 = async () => {
+    if (!videoStudio) return;
+    setVideoStudio((prev) => (prev ? { ...prev, isExportingMp4: true } : null));
+    try {
+      const res = await fetch(videoStudio.mp4ExportUrl);
+      if (!res.ok) throw new Error('Video MP4 export request failed');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const cleanTitle = (videoStudio.title || 'hyperframes_video').toLowerCase().replace(/[^a-z0-9]+/g, '_');
+      a.download = `${cleanTitle}.mp4`;
+      document.body.appendChild(a);
+      a.click();
+      URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      setToastMessage({ type: 'success', text: 'Rendered & downloaded H.264 MP4 video via Playwright & local FFmpeg!' });
+    } catch (err: any) {
+      setToastMessage({ type: 'alert', text: 'MP4 export failed: ' + err.message });
+    } finally {
+      setVideoStudio((prev) => (prev ? { ...prev, isExportingMp4: false } : null));
     }
   };
 
@@ -1499,6 +2299,49 @@ export const BlankDashboard: React.FC = () => {
                   </div>
                 </div>
 
+                {/* AIZ-Infographic Direct Generator Card */}
+                <div className="p-3.5 rounded-lg bg-gradient-to-br from-[#090d16] via-[#0f172a] to-[#1e293b] text-white border border-[#38bdf8]/40 shadow-soft space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <span className="w-2 h-2 rounded-full bg-[#38bdf8] animate-pulse"></span>
+                      <span className="text-xs font-mono font-bold tracking-wider text-[#38bdf8]">
+                        AIZ-INFOGRAPHIC COMPILATION
+                      </span>
+                    </div>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[#38bdf8]/20 text-[#38bdf8] border border-[#38bdf8]/40">
+                      Air-Gapped Tier-4
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-[#94a3b8] leading-relaxed">
+                    Compile grounded text &amp; vectors into an interactive HTML/SVG infographic with pure vector charts and provenance chips.
+                  </p>
+                  <button
+                    onClick={handleGenerateInfographicDirectly}
+                    disabled={isGenerating || !latestDoc}
+                    className="w-full py-2.5 px-3 rounded bg-[#38bdf8] hover:bg-[#0ea5e9] disabled:bg-[#475569] text-[#090d16] font-bold text-xs font-mono transition shadow-soft flex items-center justify-center space-x-2 cursor-pointer"
+                  >
+                    {isGenerating ? (
+                      <>
+                        <div className="w-3.5 h-3.5 border-2 border-[#090d16] border-t-transparent rounded-full animate-spin"></div>
+                        <span>Synthesizing Infographic...</span>
+                      </>
+                    ) : (
+                      <span>⚡ Generate AIZ Infographic Now &rarr;</span>
+                    )}
+                  </button>
+                  {!latestDoc && (
+                    <div className="text-[10px] text-[#94a3b8] font-mono text-center flex items-center justify-center gap-1.5 pt-0.5">
+                      <span>No document loaded?</span>
+                      <button
+                        onClick={() => handleLoadSample('defense')}
+                        className="text-[#38bdf8] underline hover:text-white"
+                      >
+                        Load Sample Directive
+                      </button>
+                    </div>
+                  )}
+                </div>
+
                 {/* Target Deliverable Formats Card (Compact) */}
                 <div className="bg-[#FCFBF8] border border-[#D8D5CE] rounded-lg p-4 space-y-3 shadow-soft">
                   <div className="flex items-center justify-between pb-2 border-b border-[#D8D5CE]">
@@ -1787,6 +2630,35 @@ export const BlankDashboard: React.FC = () => {
                     <div className="flex flex-wrap items-center justify-between gap-2 p-2 rounded bg-[#F8F7F3] border border-[#D8D5CE] text-xs font-mono">
                       <div className="flex items-center space-x-2">
                         <button
+                          onClick={() => handleOpenPostCardModal(selectedDeliverable)}
+                          className="px-3 py-1 rounded bg-gradient-to-r from-[#0284c7] to-[#0ea5e9] hover:from-[#0369a1] hover:to-[#0284c7] text-white flex items-center space-x-1.5 transition shadow-soft font-mono font-semibold text-xs cursor-pointer"
+                          title="Generate pixel-perfect visual cards for each post/tweet in sequence"
+                        >
+                          <span>
+                            {selectedDeliverable.content.blocks && selectedDeliverable.content.blocks.length > 1
+                              ? `📸 Thread Visual Studio (${selectedDeliverable.content.blocks.length} Cards)`
+                              : '📸 Generate Post Visual (PNG)'}
+                          </span>
+                        </button>
+                        <button
+                          onClick={() => handleOpenVideoModal(selectedDeliverable)}
+                          className="px-3 py-1 rounded bg-gradient-to-r from-[#6366f1] to-[#8b5cf6] hover:from-[#4f46e5] hover:to-[#7c3aed] text-white flex items-center space-x-1.5 transition shadow-soft font-mono font-semibold text-xs cursor-pointer"
+                          title="Generate seekable HyperFrames video with kinetic motion and export H.264 MP4"
+                        >
+                          <span>
+                            {selectedDeliverable.content.blocks && selectedDeliverable.content.blocks.length > 1
+                              ? `🎬 Thread Video Studio (${selectedDeliverable.content.blocks.length} Scenes)`
+                              : '🎬 Generate Video (MP4)'}
+                          </span>
+                        </button>
+                        <button
+                          onClick={() => setInfographicModalOutputId(selectedDeliverable.output_id)}
+                          className="px-2.5 py-1 rounded bg-[#FCFBF8] hover:bg-[#EAE8E1] border border-[#0284c7]/40 text-[#0284c7] flex items-center space-x-1 transition font-mono font-medium text-xs cursor-pointer"
+                          title="Open full document-wide interactive AIZ Infographic"
+                        >
+                          <span>🎨 Full Infographic</span>
+                        </button>
+                        <button
                           onClick={() => handleCopyContent(selectedDeliverable)}
                           className="px-2.5 py-1 rounded bg-[#FCFBF8] hover:bg-[#EAE8E1] border border-[#D8D5CE] text-[#252525] transition"
                         >
@@ -1807,8 +2679,9 @@ export const BlankDashboard: React.FC = () => {
                           className="bg-[#FCFBF8] border border-[#D8D5CE] rounded px-2 py-1 text-xs text-[#252525] font-mono"
                         >
                           <option value="markdown">Markdown (.md)</option>
+                          <option value="infographic">Interactive Infographic (.html)</option>
                           <option value="json">JSON (.json)</option>
-                          <option value="html">HTML (.html)</option>
+                          <option value="html">Standard HTML (.html)</option>
                           <option value="text">Plain Text (.txt)</option>
                         </select>
 
@@ -1905,11 +2778,29 @@ export const BlankDashboard: React.FC = () => {
                       <div className="space-y-3.5">
                         {selectedDeliverable.content.blocks.map((block) => (
                           <div key={block.block_index} className="space-y-2">
-                            {block.title && (
-                              <h4 className="text-xs font-mono font-semibold text-[#6F6D68] uppercase tracking-wider">
-                                {block.title}
-                              </h4>
-                            )}
+                            <div className="flex items-center justify-between">
+                              {block.title && (
+                                <h4 className="text-xs font-mono font-semibold text-[#6F6D68] uppercase tracking-wider">
+                                  {block.title}
+                                </h4>
+                              )}
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  onClick={() => handleOpenPostCardModal(selectedDeliverable, block.block_index)}
+                                  className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 border border-blue-200 transition cursor-pointer"
+                                  title={`Generate Visual Card specifically for ${block.title || `Block ${block.block_index + 1}`}`}
+                                >
+                                  <span>📸 Visual Card</span>
+                                </button>
+                                <button
+                                  onClick={() => handleOpenVideoModal(selectedDeliverable, block.block_index)}
+                                  className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-medium text-purple-600 bg-purple-50 hover:bg-purple-100 border border-purple-200 transition cursor-pointer"
+                                  title={`Generate Video specifically for ${block.title || `Block ${block.block_index + 1}`}`}
+                                >
+                                  <span>🎬 Video</span>
+                                </button>
+                              </div>
+                            </div>
                             <div className="space-y-2">
                               {block.sentences.map((s) => (
                                 <div
@@ -2734,6 +3625,97 @@ export const BlankDashboard: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* AIZ INFOGRAPHIC LIVE PREVIEW MODAL */}
+      {infographicModalOutputId && (
+        <div className="fixed inset-0 z-50 bg-[#090d16]/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6">
+          <div className="bg-[#0f172a] border border-[#38bdf8]/40 rounded-2xl w-full max-w-6xl h-[92vh] flex flex-col shadow-2xl overflow-hidden">
+            {/* Modal Top Bar */}
+            <div className="px-5 py-3.5 bg-[#090d16] border-b border-[#1e293b] flex items-center justify-between gap-3 text-xs font-mono text-white">
+              <div className="flex items-center space-x-3">
+                <div className="w-3 h-3 rounded-full bg-[#38bdf8] shadow-[0_0_10px_#38bdf8]"></div>
+                <span className="font-bold tracking-wider text-[#38bdf8] text-sm">
+                  AIZ-INFOGRAPHIC LIVE VISUAL COMPILER
+                </span>
+                <span className="hidden sm:inline-block px-2 py-0.5 rounded bg-[#38bdf8]/10 text-[#38bdf8] border border-[#38bdf8]/30 text-[10px]">
+                  5-Layer Architecture &bull; 100% Air-Gapped
+                </span>
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={() => setInfographicTheme(infographicTheme === 'dark' ? 'light' : 'dark')}
+                  className="px-2.5 py-1 rounded bg-[#1e293b] hover:bg-[#334155] border border-[#38bdf8]/30 text-[#e2e8f0] text-[11px] transition flex items-center space-x-1 cursor-pointer"
+                >
+                  <span>🌓 {infographicTheme === 'dark' ? 'Light Theme' : 'Dark Theme'}</span>
+                </button>
+                <a
+                  href={`/api/v1/infographics/export-png/${infographicModalOutputId}?theme=${infographicTheme}`}
+                  download={`aiz_infographic_${infographicModalOutputId.slice(0, 8)}.png`}
+                  className="px-2.5 py-1 rounded bg-[#38bdf8] hover:bg-[#0ea5e9] text-[#090d16] font-bold text-[11px] transition flex items-center space-x-1"
+                  title="Download pixel-perfect 2x retina PNG rendered by local Chromium"
+                >
+                  <span>📸 Download PNG</span>
+                </a>
+                <a
+                  href={`/api/v1/infographics/preview/${infographicModalOutputId}?theme=${infographicTheme}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-2.5 py-1 rounded bg-[#1e293b] hover:bg-[#334155] border border-[#38bdf8]/30 text-[#38bdf8] text-[11px] transition flex items-center space-x-1"
+                >
+                  <span>↗ Open in New Tab</span>
+                </a>
+                <button
+                  onClick={() => setInfographicModalOutputId(null)}
+                  className="w-7 h-7 rounded-lg bg-[#1e293b] hover:bg-[#ef4444] text-white flex items-center justify-center font-bold text-sm transition cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            {/* Iframe hosting the live standalone air-gapped HTML */}
+            <div className="flex-1 w-full bg-[#090d16] overflow-hidden relative">
+              <iframe
+                src={`/api/v1/infographics/preview/${infographicModalOutputId}?theme=${infographicTheme}`}
+                title="AIZ Infographic Preview"
+                className="w-full h-full border-0"
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* DEDICATED POST VISUAL CARD STUDIO MODAL */}
+      <PostVisualCardStudioModal
+        studio={postCardStudio}
+        onClose={() => setPostCardStudio(null)}
+        onSelectCardIndex={handleSelectCardIndex}
+        onUpdateOptions={async (opts) => {
+          await handleUpdatePostCard(
+            opts.ratio,
+            opts.theme,
+            opts.text,
+            opts.title,
+            opts.fontFamily,
+            opts.layoutPreset,
+            opts.brandName,
+            opts.classification
+          );
+        }}
+        onDownloadSinglePNG={handleDownloadPostPNG}
+        onDownloadAllPNGs={handleDownloadAllThreadPNGs}
+      />
+
+      {/* DEDICATED HYPERFRAMES VIDEO STUDIO MODAL */}
+      <HyperFramesVideoStudioModal
+        studio={videoStudio}
+        onClose={() => setVideoStudio(null)}
+        onUpdateOptions={async (opts) => {
+          await handleUpdateVideo(opts);
+        }}
+        onExportMP4={handleExportMP4}
+      />
     </div>
   );
 };

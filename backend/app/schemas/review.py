@@ -26,7 +26,7 @@ class ExportDeliverableRequest(BaseModel):
 
     export_format: str = Field(
         default="markdown",
-        description="Target export format: markdown, json, html, or text",
+        description="Target export format: markdown, json, html, text, or infographic",
     )
 
 

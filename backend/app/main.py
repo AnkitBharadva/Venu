@@ -14,9 +14,11 @@ from app.api.adapters import adapters_alias_router, router as adapters_router
 from app.api.audit import router as audit_router
 from app.api.grounding import router as grounding_router
 from app.api.health import router as health_router
+from app.api.infographics import router as infographics_router
 from app.api.ingestion import router as ingestion_router
 from app.api.review import router as review_router
 from app.api.understanding import router as understanding_router
+from app.api.video import router as video_router
 from app.core.config import get_settings
 
 # Configure structured logging
@@ -114,6 +116,8 @@ app.include_router(grounding_router)
 app.include_router(adapters_router)
 app.include_router(adapters_alias_router)
 app.include_router(review_router)
+app.include_router(infographics_router)
+app.include_router(video_router)
 
 
 @app.get("/")

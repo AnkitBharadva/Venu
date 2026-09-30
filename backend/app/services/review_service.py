@@ -804,6 +804,13 @@ class ReviewService:
             }
             return json.dumps(export_dict, indent=2)
 
+        elif export_format in ("infographic", "aiz-infographic") or (
+            export_format == "html" and output.deliverable_type == "infographic"
+        ):
+            from app.services.infographics.aiz_infographic_engine import AIZInfographicEngine
+
+            return AIZInfographicEngine.render_from_deliverable(output)
+
         elif export_format == "html":
             html_parts = [
                 "<!DOCTYPE html>",
@@ -856,7 +863,8 @@ class ReviewService:
                     stext = s.get("text", "")
                     citations = s.get("citations", [])
                     if citations:
-                        md_lines.append(f"{stext} [^{citations[0].get('chunk_id', 'ref')[:8]}]")
+                        cid = str(citations[0].get("chunk_id", "ref"))[:8]
+                        md_lines.append(f"{stext} [^{cid}]")
                     else:
                         md_lines.append(stext)
                 md_lines.append("")
