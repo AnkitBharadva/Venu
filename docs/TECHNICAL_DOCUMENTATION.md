@@ -868,8 +868,8 @@ Follow these instructions to deploy and verify the platform on a clean machine:
 
 ```bash
 # 1. Clone repository
-git clone https://github.com/organization/SIH26155-Platform.git
-cd SIH26155-Platform
+git clone https://github.com/AnkitBharadva/Venu.git
+cd Venu
 
 # 2. Configure environment
 cp .env.example .env
