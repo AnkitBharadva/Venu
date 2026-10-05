@@ -11,7 +11,7 @@
   ╚═══╝  ╚══════╝╚═╝  ╚═══╝ ╚═════╝ 
 ```
 
-### *“Every once in a while, a revolutionary product comes along that changes everything.”*
+### 
 
 **The Defense-Grade GenAI Content Transformation Platform.**  
 *100% Claim-to-Chunk Provenance. Zero Network Egress. Tamper-Evident Cryptographic Ledger.*
@@ -30,8 +30,6 @@
 </div>
 
 ## The Manifesto
-
-In 1984, the personal computer was liberated from command lines and room-sized mainframes. In 2001, ten thousand songs were slipped into a pocket. In 2007, the internet, the phone, and personal media became one single piece of glass.
 
 Today, enterprise and defense organizations are facing a crisis of intelligence.
 
